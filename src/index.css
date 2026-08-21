@@ -797,7 +797,7 @@ body {
 }
 
 .hero-search-box {
-    max-width: 600px;
+    max-width: 750px;
     width: 100%;
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
     transition: var(--transition-smooth);
@@ -809,14 +809,15 @@ body {
 }
 
 .hero-search-box input {
-    padding: 0.875rem 1rem 0.875rem 3rem;
-    font-size: 1.05rem;
-    border-radius: 12px;
+    padding: 1.1rem 1rem 1.1rem 3.75rem;
+    font-size: 1.2rem;
+    border-radius: 14px;
 }
 
 .hero-search-box svg {
-    width: 22px;
-    height: 22px;
+    width: 24px;
+    height: 24px;
+    left: 1.25rem;
 }
 
 
