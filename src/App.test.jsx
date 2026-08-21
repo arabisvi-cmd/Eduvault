@@ -47,4 +47,19 @@ describe('EduVault App Rendering & Navigation tests', () => {
     // Should be returned to Home page and showing user profile button in header
     expect(screen.getByText('arabisvi@gmail.com (Logout)')).toBeInTheDocument();
   });
+
+  it('should filter documents when typing in the hero search bar', () => {
+    render(<App />);
+
+    // Get hero search input
+    const searchInput = screen.getByTestId('hero-search-input');
+    expect(searchInput).toBeInTheDocument();
+
+    // Type a specific term e.g., 'Optics'
+    fireEvent.change(searchInput, { target: { value: 'Optics' } });
+
+    // Verify list updates
+    expect(screen.getByText('Optics Formulas & Cheat Sheet')).toBeInTheDocument();
+    expect(screen.queryByText('Mid-Term Physics Study Guide')).not.toBeInTheDocument();
+  });
 });
