@@ -788,3 +788,35 @@ body {
     gap: 0.75rem;
 }
 
+/* Hero Search Bar Styles */
+.hero-search-wrapper {
+    display: flex;
+    justify-content: center;
+    margin: 2rem 0 3rem 0;
+    width: 100%;
+}
+
+.hero-search-box {
+    max-width: 600px;
+    width: 100%;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    transition: var(--transition-smooth);
+}
+
+.hero-search-box:hover {
+    box-shadow: 0 4px 30px rgba(59, 130, 246, 0.25);
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.hero-search-box input {
+    padding: 0.875rem 1rem 0.875rem 3rem;
+    font-size: 1.05rem;
+    border-radius: 12px;
+}
+
+.hero-search-box svg {
+    width: 22px;
+    height: 22px;
+}
+
+

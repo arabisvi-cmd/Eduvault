@@ -278,6 +278,21 @@ function App() {
                 <p className="hero-subtitle">
                   Centralizing scattered classwork, administrative resources, and timelines. React components built to support the high scale load of educational institutions.
                 </p>
+                
+                <div className="hero-search-wrapper">
+                  <div className="search-box hero-search-box">
+                    <Search />
+                    <input 
+                      type="text" 
+                      data-testid="hero-search-input"
+                      placeholder="Quickly search files (e.g. Physics, Lab Report)..." 
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onFocus={() => document.getElementById('workspace').scrollIntoView({ behavior: 'smooth' })}
+                    />
+                  </div>
+                </div>
+
                 <div className="hero-buttons">
                   <button className="btn btn-primary btn-lg" onClick={() => document.getElementById('workspace').scrollIntoView({ behavior: 'smooth' })}>
                     <span>Explore Workspace Demo</span>
