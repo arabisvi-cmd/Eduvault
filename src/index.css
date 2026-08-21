@@ -660,3 +660,131 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Authentication Layout */
+.auth-section {
+    padding: 6rem 0;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 80vh;
+}
+
+.auth-card {
+    background: var(--bg-secondary);
+    backdrop-filter: var(--glass-blur);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 3rem 2.5rem;
+    width: 100%;
+    max-width: 440px;
+    box-shadow: var(--card-shadow);
+}
+
+.auth-card-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.auth-card-header h2 {
+    font-family: var(--font-heading);
+    font-size: 2rem;
+    font-weight: 750;
+    margin-bottom: 0.5rem;
+    background: linear-gradient(135deg, #60a5fa, #c084fc);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.auth-card-header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+}
+
+.auth-form {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.form-group label {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.input-wrapper {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.input-wrapper svg {
+    position: absolute;
+    left: 1rem;
+    color: var(--text-secondary);
+    width: 16px;
+    height: 16px;
+}
+
+.input-wrapper input, .input-wrapper select {
+    width: 100%;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    padding: 0.75rem 1rem 0.75rem 2.5rem;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+    outline: none;
+    transition: var(--transition-smooth);
+}
+
+.input-wrapper select {
+    appearance: none;
+    cursor: pointer;
+}
+
+.input-wrapper input:focus, .input-wrapper select:focus {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
+}
+
+.btn-block {
+    width: 100%;
+    justify-content: center;
+    padding: 0.75rem;
+    font-size: 0.95rem;
+}
+
+.auth-card-footer {
+    text-align: center;
+    margin-top: 1.5rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.auth-card-footer span {
+    color: var(--accent-blue);
+    cursor: pointer;
+    font-weight: 600;
+    transition: var(--transition-smooth);
+}
+
+.auth-card-footer span:hover {
+    text-decoration: underline;
+    color: #60a5fa;
+}
+
+.user-profile-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
