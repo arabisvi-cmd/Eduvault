@@ -1846,29 +1846,6 @@ body {
 }
 .diag-line.short { width: 60%; }
 
-/* Video Banner Preview */
-.video-banner-thumb {
-    background: #000000;
-    color: #ffffff;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-}
-.warning-text {
-    font-size: 0.5rem;
-    color: #ffffff;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-    padding: 0.5rem;
-    line-height: 1.2;
-}
-.play-overlay {
-    position: absolute;
-    color: rgba(255, 255, 255, 0.4);
-}
-
 /* PDF / Doc Thumb */
 .pdf-doc-thumb, .doc-thumb, .agreement-thumb {
     background: rgba(30, 41, 59, 0.8);

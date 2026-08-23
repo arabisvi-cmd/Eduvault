@@ -4,10 +4,10 @@ import {
   Users, BookOpen, Clock, Search, UploadCloud, FileText, 
   FileSpreadsheet, FileCheck, CheckCircle, Circle, Shield, Info, FolderOpen,
   Lock, ArrowLeft, LogIn, UserPlus, Menu, ChevronLeft, ChevronRight, Plus,
-  Trash2, Folder, Image, File, Download, Eye, Home, HardDrive, Laptop,
-  Star, AlertOctagon, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
-  Film, FileCode, Archive, Sparkles, X, Check, MoreHorizontal, FolderGit2,
-  Share2, FolderInput, Copy, Pencil, ThumbsDown, ExternalLink
+  Trash2, Folder, Image, File, Download, Eye, Home, HardDrive,
+  Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
+  Film, FileCode, Archive, Sparkles, X, Check,
+  Share2, FolderInput, Copy, Pencil, ExternalLink
 } from 'lucide-react';
 
 const INITIAL_FOLDERS = [
@@ -310,6 +310,25 @@ const FILTER_DEFINITIONS = {
   }
 };
 
+function Modal({ title, icon: Icon, onClose, children }) {
+  return (
+    <div className="gdrive-modal-overlay" onClick={onClose}>
+      <div className="gdrive-move-modal-card" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-header-standard">
+          <div className="modal-title-row">
+            {Icon && <Icon size={20} className="modal-title-icon" />}
+            <h3>{title}</h3>
+          </div>
+          <button className="modal-close-icon-btn" onClick={onClose}>
+            <X size={20} />
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [documents, setDocuments] = useState(INITIAL_DOCUMENTS);
   const [filterInst, setFilterInst] = useState("inst-1");
@@ -555,12 +574,13 @@ function App() {
   };
 
   const handleMakeCopy = (doc) => {
+    const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const copyDoc = {
       ...doc,
       id: Date.now(),
       title: `Copy of ${doc.title}`,
-      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
-      activity: `You created • ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+      date: today,
+      activity: `You created • ${today.split(',')[0]}`
     };
     setDocuments([copyDoc, ...documents]);
     showToast(`Created "Copy of ${doc.title}"`, "check-circle");
@@ -680,44 +700,26 @@ function App() {
       case 'diagram-preview':
         return (
           <div className="thumb-preview diagram-thumb">
-            <div className="diagram-header">
-              <span>BIOLOGY DIAGRAM</span>
-            </div>
+            <div className="diagram-header"><span>BIOLOGY DIAGRAM</span></div>
             <div className="diagram-body">
-              <div className="cell-circle">
-                <div className="nucleus"></div>
-              </div>
-              <div className="diagram-labels">
-                <div className="diag-line"></div>
-                <div className="diag-line short"></div>
-              </div>
+              <div className="cell-circle"><div className="nucleus"></div></div>
+              <div className="diagram-labels"><div className="diag-line"></div><div className="diag-line short"></div></div>
             </div>
           </div>
         );
       case 'code-preview':
         return (
           <div className="thumb-preview ipynb-thumb">
-            <div className="code-header">
-              <div className="jupyter-dot"></div>
-              <span>Algorithms & Data Structures</span>
-            </div>
-            <div className="code-box">
-              <code>function binarySearch(arr, t) {'{'}</code>
-              <code>  let l = 0, r = arr.length - 1;</code>
-              <code>  return l &lt;= r;</code>
-              <code>{'}'}</code>
-            </div>
+            <div className="code-header"><div className="jupyter-dot"></div><span>Algorithms & Data</span></div>
+            <div className="code-box"><code>function binarySearch(arr, t) {'{ ... }'}</code></div>
           </div>
         );
       case 'agreement-preview':
         return (
           <div className="thumb-preview agreement-thumb">
             <div className="doc-page">
-              <div className="doc-h1 text-center">Safety & Compliance Protocol</div>
-              <div className="doc-p"></div>
-              <div className="doc-p short"></div>
-              <div className="doc-p"></div>
-              <div className="doc-sign-line"></div>
+              <div className="doc-h1">Safety & Compliance Protocol</div>
+              <div className="doc-p"></div><div className="doc-p short"></div><div className="doc-sign-line"></div>
             </div>
           </div>
         );
@@ -725,39 +727,20 @@ function App() {
         return (
           <div className="thumb-preview sheet-thumb">
             <table className="mini-sheet">
-              <thead>
-                <tr><th>ID</th><th>Student</th><th>Score</th><th>Grade</th></tr>
-              </thead>
-              <tbody>
-                <tr><td>101</td><td>Alice M.</td><td>94%</td><td>A</td></tr>
-                <tr><td>102</td><td>Bob K.</td><td>88%</td><td>B+</td></tr>
-                <tr><td>103</td><td>David S.</td><td>96%</td><td>A+</td></tr>
-              </tbody>
+              <thead><tr><th>ID</th><th>Student</th><th>Score</th><th>Grade</th></tr></thead>
+              <tbody><tr><td>101</td><td>Alice M.</td><td>94%</td><td>A</td></tr><tr><td>102</td><td>Bob K.</td><td>88%</td><td>B+</td></tr></tbody>
             </table>
           </div>
         );
       case 'doc-text':
-        return (
-          <div className="thumb-preview doc-thumb">
-            <div className="doc-page">
-              <div className="doc-h1 blue-h1">{doc.title}</div>
-              <div className="doc-p"></div>
-              <div className="doc-p"></div>
-              <div className="doc-p short"></div>
-            </div>
-          </div>
-        );
       case 'pdf-text':
       default:
         return (
           <div className="thumb-preview pdf-doc-thumb">
             <div className="doc-page">
               <div className="doc-h1">{doc.title}</div>
-              <div className="doc-p"></div>
-              <div className="doc-p short"></div>
-              <div className="doc-h2">KEY OBJECTIVES & NOTES</div>
-              <div className="doc-p"></div>
-              <div className="doc-p mini"></div>
+              <div className="doc-p"></div><div className="doc-p short"></div>
+              <div className="doc-p"></div><div className="doc-p mini"></div>
             </div>
           </div>
         );
@@ -1934,304 +1917,232 @@ function App() {
 
       {/* Move File Modal */}
       {movingDoc && (
-        <div className="gdrive-modal-overlay" onClick={() => setMovingDoc(null)}>
-          <div className="gdrive-move-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-standard">
-              <div className="modal-title-row">
-                <FolderInput size={20} className="modal-title-icon" />
-                <h3>Move "{movingDoc.title}"</h3>
-              </div>
-              <button className="modal-close-icon-btn" onClick={() => setMovingDoc(null)}>
-                <X size={20} />
+        <Modal title={`Move "${movingDoc.title}"`} icon={FolderInput} onClose={() => setMovingDoc(null)}>
+          <div className="move-modal-body">
+            <p className="move-prompt-text">Choose a destination folder in your EduVault:</p>
+            <div className="move-folders-list">
+              <button 
+                className={`move-folder-option ${movingDoc.folderId === null ? 'current-location' : ''}`}
+                onClick={() => handleMoveDocument(null)}
+              >
+                <HardDrive size={18} />
+                <span>My Vault (Root)</span>
+                {movingDoc.folderId === null && <span className="current-badge">Current</span>}
               </button>
-            </div>
-
-            <div className="move-modal-body">
-              <p className="move-prompt-text">Choose a destination folder in your EduVault:</p>
-              <div className="move-folders-list">
+              
+              {folders.map(f => (
                 <button 
-                  className={`move-folder-option ${movingDoc.folderId === null ? 'current-location' : ''}`}
-                  onClick={() => handleMoveDocument(null)}
+                  key={f.id}
+                  className={`move-folder-option ${movingDoc.folderId === f.id ? 'current-location' : ''}`}
+                  onClick={() => handleMoveDocument(f.id)}
                 >
-                  <HardDrive size={18} />
-                  <span>My Vault (Root)</span>
-                  {movingDoc.folderId === null && <span className="current-badge">Current</span>}
+                  <Folder size={18} />
+                  <span>{f.name}</span>
+                  {movingDoc.folderId === f.id && <span className="current-badge">Current</span>}
                 </button>
-                
-                {folders.map(f => (
-                  <button 
-                    key={f.id}
-                    className={`move-folder-option ${movingDoc.folderId === f.id ? 'current-location' : ''}`}
-                    onClick={() => handleMoveDocument(f.id)}
-                  >
-                    <Folder size={18} />
-                    <span>{f.name}</span>
-                    {movingDoc.folderId === f.id && <span className="current-badge">Current</span>}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="modal-actions-footer">
-              <button className="btn btn-secondary btn-sm" onClick={() => setMovingDoc(null)}>
-                Cancel
-              </button>
+              ))}
             </div>
           </div>
-        </div>
+
+          <div className="modal-actions-footer">
+            <button className="btn btn-secondary btn-sm" onClick={() => setMovingDoc(null)}>
+              Cancel
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* Share File Modal */}
       {sharingDoc && (
-        <div className="gdrive-modal-overlay" onClick={() => setSharingDoc(null)}>
-          <div className="gdrive-share-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-standard">
-              <div className="modal-title-row">
-                <Share2 size={20} className="modal-title-icon" />
-                <h3>Share "{sharingDoc.title}"</h3>
-              </div>
-              <button className="modal-close-icon-btn" onClick={() => setSharingDoc(null)}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <div className="share-modal-body">
-              <div className="share-link-section">
-                <label>Shareable Link</label>
-                <div className="copy-link-box">
-                  <input 
-                    type="text" 
-                    readOnly 
-                    value={`https://eduvault.school.edu/share/doc-${sharingDoc.id}`}
-                  />
-                  <button 
-                    className="btn btn-primary btn-sm copy-btn"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(`https://eduvault.school.edu/share/doc-${sharingDoc.id}`);
-                      showToast("Link copied to clipboard!", "check-circle");
-                    }}
-                  >
-                    <Copy size={14} />
-                    <span>Copy Link</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="share-permissions-section">
-                <label>Access Level</label>
-                <select defaultValue="view" className="share-select">
-                  <option value="view">Anyone with link can view (Read-only)</option>
-                  <option value="comment">Class students can comment</option>
-                  <option value="edit">Teaching staff can edit</option>
-                </select>
+        <Modal title={`Share "${sharingDoc.title}"`} icon={Share2} onClose={() => setSharingDoc(null)}>
+          <div className="share-modal-body">
+            <div className="share-link-section">
+              <label>Shareable Link</label>
+              <div className="copy-link-box">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={`https://eduvault.school.edu/share/doc-${sharingDoc.id}`}
+                />
+                <button 
+                  className="btn btn-primary btn-sm copy-btn"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(`https://eduvault.school.edu/share/doc-${sharingDoc.id}`);
+                    showToast("Link copied to clipboard!", "check-circle");
+                  }}
+                >
+                  <Copy size={14} />
+                  <span>Copy Link</span>
+                </button>
               </div>
             </div>
 
-            <div className="modal-actions-footer">
-              <button className="btn btn-primary btn-sm" onClick={() => {
-                showToast(`Share settings saved for "${sharingDoc.title}"`, "check-circle");
-                setSharingDoc(null);
-              }}>
-                Done
-              </button>
+            <div className="share-permissions-section">
+              <label>Access Level</label>
+              <select defaultValue="view" className="share-select">
+                <option value="view">Anyone with link can view (Read-only)</option>
+                <option value="comment">Class students can comment</option>
+                <option value="edit">Teaching staff can edit</option>
+              </select>
             </div>
           </div>
-        </div>
+
+          <div className="modal-actions-footer">
+            <button className="btn btn-primary btn-sm" onClick={() => {
+              showToast(`Share settings saved for "${sharingDoc.title}"`, "check-circle");
+              setSharingDoc(null);
+            }}>
+              Done
+            </button>
+          </div>
+        </Modal>
       )}
 
       {/* Rename File Modal */}
       {renamingDoc && (
-        <div className="gdrive-modal-overlay" onClick={() => setRenamingDoc(null)}>
-          <div className="gdrive-move-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-standard">
-              <div className="modal-title-row">
-                <Pencil size={20} className="modal-title-icon" />
-                <h3>Rename</h3>
-              </div>
-              <button className="modal-close-icon-btn" onClick={() => setRenamingDoc(null)}>
-                <X size={20} />
-              </button>
+        <Modal title="Rename" icon={Pencil} onClose={() => setRenamingDoc(null)}>
+          <form onSubmit={handleRenameSubmit}>
+            <div className="move-modal-body">
+              <input 
+                type="text" 
+                className="share-select" 
+                value={renameInputVal} 
+                onChange={(e) => setRenameInputVal(e.target.value)}
+                autoFocus
+                required
+              />
             </div>
 
-            <form onSubmit={handleRenameSubmit}>
-              <div className="move-modal-body">
-                <input 
-                  type="text" 
-                  className="share-select" 
-                  value={renameInputVal} 
-                  onChange={(e) => setRenameInputVal(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-
-              <div className="modal-actions-footer">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRenamingDoc(null)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  OK
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div className="modal-actions-footer">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRenamingDoc(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm">
+                OK
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {/* Rename Folder Modal */}
       {renamingFolder && (
-        <div className="gdrive-modal-overlay" onClick={() => setRenamingFolder(null)}>
-          <div className="gdrive-move-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-standard">
-              <div className="modal-title-row">
-                <Pencil size={20} className="modal-title-icon" />
-                <h3>Rename folder</h3>
-              </div>
-              <button className="modal-close-icon-btn" onClick={() => setRenamingFolder(null)}>
-                <X size={20} />
-              </button>
+        <Modal title="Rename folder" icon={Pencil} onClose={() => setRenamingFolder(null)}>
+          <form onSubmit={handleRenameFolderSubmit}>
+            <div className="move-modal-body">
+              <input 
+                type="text" 
+                className="share-select" 
+                value={renameFolderInputVal} 
+                onChange={(e) => setRenameFolderInputVal(e.target.value)}
+                autoFocus
+                required
+              />
             </div>
 
-            <form onSubmit={handleRenameFolderSubmit}>
-              <div className="move-modal-body">
-                <input 
-                  type="text" 
-                  className="share-select" 
-                  value={renameFolderInputVal} 
-                  onChange={(e) => setRenameFolderInputVal(e.target.value)}
-                  autoFocus
-                  required
-                />
-              </div>
-
-              <div className="modal-actions-footer">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRenamingFolder(null)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  OK
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+            <div className="modal-actions-footer">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setRenamingFolder(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm">
+                OK
+              </button>
+            </div>
+          </form>
+        </Modal>
       )}
 
       {/* Share Folder Modal */}
       {sharingFolder && (
-        <div className="gdrive-modal-overlay" onClick={() => setSharingFolder(null)}>
-          <div className="gdrive-share-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-standard">
-              <div className="modal-title-row">
-                <Share2 size={20} className="modal-title-icon" />
-                <h3>Share folder "{sharingFolder.name}"</h3>
+        <Modal title={`Share folder "${sharingFolder.name}"`} icon={Share2} onClose={() => setSharingFolder(null)}>
+          <div className="share-modal-body">
+            <div className="share-link-section">
+              <label>Folder Shareable Link</label>
+              <div className="copy-link-box">
+                <input 
+                  type="text" 
+                  readOnly 
+                  value={`https://eduvault.school.edu/share/folder-${sharingFolder.id}`}
+                />
+                <button 
+                  className="btn btn-primary btn-sm copy-btn"
+                  onClick={() => {
+                    navigator.clipboard?.writeText(`https://eduvault.school.edu/share/folder-${sharingFolder.id}`);
+                    showToast("Folder link copied to clipboard!", "check-circle");
+                  }}
+                >
+                  <Copy size={14} />
+                  <span>Copy Link</span>
+                </button>
               </div>
-              <button className="modal-close-icon-btn" onClick={() => setSharingFolder(null)}>
-                <X size={20} />
-              </button>
             </div>
 
-            <div className="share-modal-body">
+            <div className="share-permissions-section">
+              <label>Access Level</label>
+              <select defaultValue="view" className="share-select">
+                <option value="view">Anyone in institution can view (Read-only)</option>
+                <option value="edit">Organizers & Teaching staff can add/edit</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="modal-actions-footer">
+            <button className="btn btn-primary btn-sm" onClick={() => {
+              showToast(`Share settings saved for folder "${sharingFolder.name}"`, "check-circle");
+              setSharingFolder(null);
+            }}>
+              Done
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {/* Create Custom Filter Modal */}
+      {showCreateFilterModal && (
+        <Modal title="Create Custom Filter" icon={Filter} onClose={() => setShowCreateFilterModal(false)}>
+          <form onSubmit={handleAddCustomFilter}>
+            <div className="move-modal-body">
               <div className="share-link-section">
-                <label>Folder Shareable Link</label>
-                <div className="copy-link-box">
-                  <input 
-                    type="text" 
-                    readOnly 
-                    value={`https://eduvault.school.edu/share/folder-${sharingFolder.id}`}
-                  />
-                  <button 
-                    className="btn btn-primary btn-sm copy-btn"
-                    onClick={() => {
-                      navigator.clipboard?.writeText(`https://eduvault.school.edu/share/folder-${sharingFolder.id}`);
-                      showToast("Folder link copied to clipboard!", "check-circle");
-                    }}
-                  >
-                    <Copy size={14} />
-                    <span>Copy Link</span>
-                  </button>
-                </div>
+                <label>Filter Dimension</label>
+                <select 
+                  className="share-select"
+                  value={filterCategory}
+                  onChange={(e) => {
+                    const newCat = e.target.value;
+                    setFilterCategory(newCat);
+                    setFilterVal(FILTER_DEFINITIONS[newCat].options[0].value);
+                  }}
+                >
+                  {Object.entries(FILTER_DEFINITIONS).map(([catKey, catDef]) => (
+                    <option key={catKey} value={catKey}>{catDef.label}</option>
+                  ))}
+                </select>
               </div>
 
               <div className="share-permissions-section">
-                <label>Access Level</label>
-                <select defaultValue="view" className="share-select">
-                  <option value="view">Anyone in institution can view (Read-only)</option>
-                  <option value="edit">Organizers & Teaching staff can add/edit</option>
+                <label>Filter Value</label>
+                <select 
+                  className="share-select"
+                  value={filterVal}
+                  onChange={(e) => setFilterVal(e.target.value)}
+                >
+                  {FILTER_DEFINITIONS[filterCategory].options.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
               </div>
             </div>
 
             <div className="modal-actions-footer">
-              <button className="btn btn-primary btn-sm" onClick={() => {
-                showToast(`Share settings saved for folder "${sharingFolder.name}"`, "check-circle");
-                setSharingFolder(null);
-              }}>
-                Done
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreateFilterModal(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm">
+                Apply Filter
               </button>
             </div>
-          </div>
-        </div>
-      )}
-
-      {/* Create Custom Filter Modal */}
-      {showCreateFilterModal && (
-        <div className="gdrive-modal-overlay" onClick={() => setShowCreateFilterModal(false)}>
-          <div className="gdrive-move-modal-card" onClick={(e) => e.stopPropagation()}>
-            <div className="modal-header-standard">
-              <div className="modal-title-row">
-                <Filter size={20} className="modal-title-icon" />
-                <h3>Create Custom Filter</h3>
-              </div>
-              <button className="modal-close-icon-btn" onClick={() => setShowCreateFilterModal(false)}>
-                <X size={20} />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddCustomFilter}>
-              <div className="move-modal-body">
-                <div className="share-link-section">
-                  <label>Filter Dimension</label>
-                  <select 
-                    className="share-select"
-                    value={filterCategory}
-                    onChange={(e) => {
-                      const newCat = e.target.value;
-                      setFilterCategory(newCat);
-                      setFilterVal(FILTER_DEFINITIONS[newCat].options[0].value);
-                    }}
-                  >
-                    {Object.entries(FILTER_DEFINITIONS).map(([catKey, catDef]) => (
-                      <option key={catKey} value={catKey}>{catDef.label}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="share-permissions-section">
-                  <label>Filter Value</label>
-                  <select 
-                    className="share-select"
-                    value={filterVal}
-                    onChange={(e) => setFilterVal(e.target.value)}
-                  >
-                    {FILTER_DEFINITIONS[filterCategory].options.map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div className="modal-actions-footer">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowCreateFilterModal(false)}>
-                  Cancel
-                </button>
-                <button type="submit" className="btn btn-primary btn-sm">
-                  Apply Filter
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+          </form>
+        </Modal>
       )}
 
       {/* Global Footer (only for non-workspace view) */}
