@@ -1,0 +1,20 @@
+name: Discord PR Review Request
+
+on:
+  pull_request:
+    types: [review_requested]
+
+jobs:
+  notify-discord:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Discord notification
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d '{
+              "content": "🔔 A review has been requested for PR #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}\n👤 Author: ${{ github.event.pull_request.user.login }}\n👀 Reviewer: ${{ github.event.requested_reviewer.login }}\n🔗 ${{ github.event.pull_request.html_url }}"
+            }' \
+            "$DISCORD_WEBHOOK"
