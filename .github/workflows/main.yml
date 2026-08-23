@@ -12,9 +12,13 @@ jobs:
       - name: Send Discord notification
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          REVIEWER: ${{ github.event.requested_reviewer.login }}
         run: |
-          curl -H "Content-Type: application/json" \
-            -d '{
-              "content": "🔔 A review has been requested for PR #${{ github.event.pull_request.number }} — ${{ github.event.pull_request.title }}\n👤 Author: ${{ github.event.pull_request.user.login }}\n👀 Reviewer: ${{ github.event.requested_reviewer.login }}\n🔗 ${{ github.event.pull_request.html_url }}"
-            }' \
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            -d "{\"content\":\"🔔 Review requested for PR #${PR_NUMBER} — ${PR_TITLE}\\n👤 Author: ${PR_AUTHOR}\\n👀 Reviewer: ${REVIEWER}\\n🔗 ${PR_URL}\"}" \
             "$DISCORD_WEBHOOK"
