@@ -1,8 +1,29 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import React from 'react';
 import App from './App';
 import '@testing-library/jest-dom';
+
+vi.mock('./lib/supabase', () => ({
+  isSupabaseConfigured: true,
+  supabase: {
+    auth: {
+      getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
+      onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
+      signInWithPassword: vi.fn().mockResolvedValue({ data: { user: { email: 'arabisvi@gmail.com' } }, error: null }),
+      signUp: vi.fn().mockResolvedValue({ data: { user: { email: 'arabisvi@gmail.com' } }, error: null }),
+      signOut: vi.fn().mockResolvedValue({ error: null })
+    },
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        order: vi.fn().mockResolvedValue({ data: [], error: null })
+      }),
+      insert: vi.fn().mockReturnValue({
+        select: vi.fn().mockResolvedValue({ data: [], error: null })
+      })
+    })
+  }
+}));
 
 describe('EduVault App Rendering & Navigation tests', () => {
   it('should render the app logo and vision description on loading', () => {
@@ -26,7 +47,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByPlaceholderText('you@school.edu')).toBeInTheDocument();
   });
 
-  it('should sign in and update user context when submitting form', () => {
+  it('should sign in and update user context when submitting form', async () => {
     render(<App />);
     
     // Navigate to Login Page
@@ -45,7 +66,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     fireEvent.click(submitBtn);
     
     // Should be returned to Home page and showing user profile button in header
-    expect(screen.getByText('arabisvi@gmail.com (Logout)')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('arabisvi@gmail.com (Logout)')).toBeInTheDocument();
+    });
   });
 
   it('should filter documents when typing in the hero search bar', () => {
