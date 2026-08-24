@@ -9,6 +9,7 @@ import {
   Film, FileCode, Archive, Sparkles, X, Check,
   Share2, FolderInput, Copy, Pencil, ExternalLink
 } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from './lib/supabase';
 
 const INITIAL_FOLDERS = [
   { id: "folder-1", name: "Physics Lecture Slides", path: "in EduVault Drive" },
@@ -423,7 +424,66 @@ function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Document Filtering for Home Demo Section
+  // Supabase Auth & Document Fetching
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) return;
+
+    // Check existing auth session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        setCurrentUser(session.user.email);
+      }
+    });
+
+    // Listen for auth state changes
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        setCurrentUser(session.user.email);
+      } else {
+        setCurrentUser(null);
+      }
+    });
+
+    // Fetch documents from Supabase
+    async function loadDocuments() {
+      try {
+        const { data, error } = await supabase
+          .from('documents')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          const mappedDocs = data.map(doc => ({
+            id: doc.id,
+            title: doc.title,
+            institution: doc.institution,
+            year: doc.academic_year || doc.year || '2026-2027',
+            class: doc.class_grade || doc.class || 'grade-10',
+            subject: doc.subject || 'physics',
+            timeline: doc.timeline || 'term-1',
+            type: doc.file_type || doc.type || 'pdf',
+            size: doc.file_size || doc.size || '1.0 MB',
+            date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recently',
+            activity: `Uploaded • ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Recently'}`,
+            owner: doc.owner || "me",
+            section: doc.section || "Section A",
+            role: doc.role || "students",
+            folderId: doc.folderId || null,
+            previewType: doc.file_type === 'image' ? 'diagram-preview' : doc.file_type === 'xlsx' ? 'sheet-preview' : doc.file_type === 'code' ? 'code-preview' : 'pdf-text'
+          }));
+          setDocuments(mappedDocs);
+        }
+      } catch (err) {
+        console.warn('Could not load documents from Supabase, using defaults', err);
+      }
+    }
+
+    loadDocuments();
+
+    return () => {
+      subscription?.unsubscribe();
+    };
+  }, []);
   const filteredDocs = documents.filter(doc => {
     if (filterInst !== 'all' && doc.institution !== filterInst) return false;
     if (filterYear !== 'all' && doc.year !== filterYear) return false;
@@ -489,7 +549,7 @@ function App() {
     return true;
   });
 
-  const handleWorkspaceFileUpload = (e) => {
+  const handleWorkspaceFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
@@ -529,6 +589,29 @@ function App() {
       folderId: activeFolderId,
       previewType: type === 'image' ? 'diagram-preview' : type === 'xlsx' ? 'sheet-preview' : type === 'code' ? 'code-preview' : 'pdf-text'
     };
+
+    if (isSupabaseConfigured && supabase) {
+      try {
+        const { data, error } = await supabase.from('documents').insert([{
+          title: newDoc.title,
+          institution: newDoc.institution,
+          academic_year: newDoc.year,
+          class_grade: newDoc.class,
+          subject: newDoc.subject,
+          timeline: newDoc.timeline,
+          file_type: newDoc.type,
+          file_size: newDoc.size
+        }]).select();
+
+        if (error) {
+          console.error("Supabase insert error:", error);
+        } else if (data && data[0]) {
+          newDoc.id = data[0].id;
+        }
+      } catch (err) {
+        console.warn("Could not insert document to Supabase:", err);
+      }
+    }
 
     setDocuments([newDoc, ...documents]);
     showToast(`Uploaded "${newDoc.title}" to Workspace`, "check-circle");
@@ -622,19 +705,57 @@ function App() {
     setRenameFolderInputVal("");
   };
 
-  const handleAuthSubmit = (e) => {
+  const handleAuthSubmit = async (e) => {
     e.preventDefault();
     if (!emailInput || !passwordInput) {
       showToast("Please fill in all required fields", "info");
       return;
     }
 
-    if (currentView === "login") {
-      setCurrentUser(emailInput);
-      showToast(`Welcome back, ${emailInput}!`, "check-circle");
+    if (isSupabaseConfigured && supabase) {
+      try {
+        if (currentView === "login") {
+          const { data, error } = await supabase.auth.signInWithPassword({
+            email: emailInput,
+            password: passwordInput
+          });
+          if (error) {
+            showToast(error.message, "info");
+            return;
+          }
+          setCurrentUser(data.user?.email || emailInput);
+          showToast(`Welcome back, ${data.user?.email || emailInput}!`, "check-circle");
+        } else {
+          const { data, error } = await supabase.auth.signUp({
+            email: emailInput,
+            password: passwordInput,
+            options: {
+              data: {
+                full_name: nameInput,
+                institution: institutionInput
+              }
+            }
+          });
+          if (error) {
+            showToast(error.message, "info");
+            return;
+          }
+          setCurrentUser(data.user?.email || emailInput);
+          showToast(`Account created successfully for ${emailInput}!`, "check-circle");
+        }
+      } catch (err) {
+        showToast(err.message || "Authentication error", "info");
+        return;
+      }
     } else {
-      setCurrentUser(emailInput);
-      showToast(`Account created successfully for ${emailInput}!`, "check-circle");
+      // Fallback for local simulation
+      if (currentView === "login") {
+        setCurrentUser(emailInput);
+        showToast(`Welcome back, ${emailInput}!`, "check-circle");
+      } else {
+        setCurrentUser(emailInput);
+        showToast(`Account created successfully for ${emailInput}!`, "check-circle");
+      }
     }
     
     setEmailInput("");
@@ -643,7 +764,14 @@ function App() {
     setCurrentView("home");
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (isSupabaseConfigured && supabase) {
+      try {
+        await supabase.auth.signOut();
+      } catch (err) {
+        console.warn("Logout error:", err);
+      }
+    }
     setCurrentUser(null);
     showToast("Logged out successfully", "info");
   };
