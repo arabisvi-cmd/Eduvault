@@ -3,8 +3,8 @@ import {
   ShieldCheck, Mail, ArrowRight, Filter, School, Calendar, 
   Users, BookOpen, Clock, Search, UploadCloud, FileText, 
   FileSpreadsheet, FileCheck, CheckCircle, Circle, Shield, Info, FolderOpen,
-  Lock, ArrowLeft, LogIn, UserPlus, Menu, ChevronLeft, ChevronRight, Plus,
-  Trash2, Folder, Image, File, Download, Eye, Home, HardDrive,
+  Lock, ArrowLeft, LogIn, UserPlus, ChevronRight, Plus,
+  Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, Sparkles, X, Check,
   Share2, FolderInput, Copy, Pencil, ExternalLink
@@ -1733,6 +1733,20 @@ function App() {
                                         </button>
 
                                         <div className="context-menu-divider"></div>
+
+                                        {/* Star / Unstar */}
+                                        <button 
+                                          className="context-menu-item"
+                                          onClick={() => {
+                                            handleToggleStar(doc.id);
+                                            setActiveMenuDocId(null);
+                                          }}
+                                        >
+                                          <div className="item-icon-box">
+                                            <Star size={16} fill={doc.starred ? "currentColor" : "none"} />
+                                          </div>
+                                          <span className="item-label">{doc.starred ? "Remove from Starred" : "Add to Starred"}</span>
+                                        </button>
 
                                         {/* Row 2: Download */}
                                         <button 
