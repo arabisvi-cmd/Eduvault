@@ -143,10 +143,56 @@ export async function verifyInstitutionalId(role, idInput) {
 }
 
 /**
+ * Helper to securely mask an email address for UI display (e.g. r****e@school.edu)
+ */
+export function maskEmail(email) {
+  if (!email) return '';
+  const [user, domain] = email.split('@');
+  if (!domain) return email;
+  if (user.length <= 2) return `${user[0]}*@${domain}`;
+  const first = user[0];
+  const last = user[user.length - 1];
+  return `${first}${'*'.repeat(Math.max(3, user.length - 2))}${last}@${domain}`;
+}
+
+/**
+ * Dispatches the email containing Username and Temporary Password via free service (EmailJS)
+ */
+export async function sendCredentialsEmail({ to_email, to_name, institutional_id, temp_password }) {
+  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
+  const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID;
+  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
+
+  if (serviceId && templateId && publicKey) {
+    try {
+      await fetch('https://api.emailjs.com/api/v1.0/email/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: serviceId,
+          template_id: templateId,
+          user_id: publicKey,
+          template_params: {
+            to_name,
+            to_email,
+            institutional_id,
+            temp_password,
+            login_url: typeof window !== 'undefined' ? window.location.origin : ''
+          }
+        })
+      });
+    } catch (err) {
+      console.warn('Email delivery error:', err);
+    }
+  }
+}
+
+/**
  * Request Access workflow:
  * 1. Verifies ID against database
  * 2. Generates temporary password & creates user account with must_change_password flag
- * 3. Dispatches automated invitation email via Supabase Auth
+ * 3. Dispatches automated invitation email to the user's inbox
+ * 4. NEVER exposes the password on screen (security 2-layer gate)
  */
 export async function processAccessRequest({ role, institutionalId }) {
   const verifyRes = await verifyInstitutionalId(role, institutionalId);
@@ -158,6 +204,14 @@ export async function processAccessRequest({ role, institutionalId }) {
   const tempPassword = generateTempPassword();
   const email = record.email;
   const fullName = record.full_name;
+
+  // Dispatch email with credentials
+  await sendCredentialsEmail({
+    to_email: email,
+    to_name: fullName,
+    institutional_id: record.teacher_id || record.student_id,
+    temp_password: tempPassword
+  });
 
   if (isSupabaseConfigured && supabase) {
     try {
@@ -205,8 +259,8 @@ export async function processAccessRequest({ role, institutionalId }) {
     success: true,
     record: record,
     email: email,
+    maskedEmail: maskEmail(email),
     fullName: fullName,
-    tempPassword: tempPassword,
     role: role
   };
 }

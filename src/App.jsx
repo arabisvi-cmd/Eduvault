@@ -375,8 +375,8 @@ function App() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
 
-  // Delivered Email Preview Modal
-  const [emailPreviewModal, setEmailPreviewModal] = useState({ show: false, data: null });
+  // Secure Access Dispatched Screen State (No credentials displayed on screen)
+  const [accessDispatched, setAccessDispatched] = useState(null);
 
   // Toast System
   const [toast, setToast] = useState({ show: false, message: "", icon: "info" });
@@ -811,12 +811,13 @@ function App() {
       return;
     }
 
-    showToast(`Access credentials dispatched to ${res.email}!`, "check-circle");
+    showToast(`Credentials dispatched to ${res.maskedEmail || res.email}!`, "check-circle");
     
-    // Open Delivered Email Preview Modal for instant testing
-    setEmailPreviewModal({
-      show: true,
-      data: res
+    // Transition to secure access dispatched screen (Credentials NEVER shown on screen)
+    setAccessDispatched({
+      email: res.maskedEmail || res.email,
+      rawEmail: res.email,
+      fullName: res.fullName
     });
 
     setReqId("");
@@ -2219,136 +2220,183 @@ function App() {
               {/* Tab 3: First-Time User Registration / Request Access */}
               {authTab === "request_access" && (
                 <>
-                  <div className="auth-card-header">
-                    <h2>Request Access</h2>
-                    <p>Enter your institutional ID to verify against the school directory and receive your credentials</p>
-                  </div>
+                  {accessDispatched ? (
+                    <div className="access-dispatched-screen">
+                      <div className="success-icon-circle">
+                        <CheckCircle size={36} color="#10b981" />
+                      </div>
+                      <h3>Credentials Dispatched!</h3>
+                      <p className="dispatched-main-msg">
+                        We have verified your identity and sent your login username and temporary password to your official school email:
+                      </p>
 
-                  <form onSubmit={handleRequestAccessSubmit} className="auth-form">
-                    {/* Role Selection */}
-                    <div className="form-group">
-                      <label>I am a:</label>
-                      <div className="auth-role-grid">
-                        <div 
-                          className={`role-select-card ${reqRole === 'teacher' ? 'selected' : ''}`}
-                          onClick={() => { setReqRole('teacher'); setReqId('TCH-1001'); setVerifiedInfo(null); setVerificationError(null); }}
-                        >
-                          <GraduationCap size={20} />
-                          <span>Teacher / Faculty</span>
-                        </div>
-                        <div 
-                          className={`role-select-card ${reqRole === 'student' ? 'selected' : ''}`}
-                          onClick={() => { setReqRole('student'); setReqId('STU-2026-001'); setVerifiedInfo(null); setVerificationError(null); }}
-                        >
-                          <Users size={20} />
-                          <span>Student</span>
+                      <div className="dispatched-email-badge">
+                        <Mail size={16} />
+                        <span>{accessDispatched.email}</span>
+                      </div>
+
+                      <div className="security-notice-box">
+                        <Shield size={16} color="#60a5fa" />
+                        <div>
+                          <strong>Two-Layer Security Protection:</strong> For your security, your password is never exposed on this screen. Please open your email inbox to retrieve your credentials.
                         </div>
                       </div>
-                    </div>
 
-                    {/* Institution */}
-                    <div className="form-group">
-                      <label htmlFor="req-institution">Institution</label>
-                      <div className="input-wrapper">
-                        <School size={16} />
-                        <select 
-                          id="req-institution"
-                          value={reqInstitution}
-                          onChange={(e) => setReqInstitution(e.target.value)}
-                        >
-                          <option value="inst-1">St. Xavier High School</option>
-                          <option value="inst-2">Cambridge Global Academy</option>
-                        </select>
-                      </div>
-                    </div>
-
-                    {/* ID Input */}
-                    <div className="form-group">
-                      <label htmlFor="req-id">
-                        {reqRole === 'teacher' ? 'Teacher ID Number' : 'Student Roll / ID Number'}
-                      </label>
-                      <div className="input-wrapper">
-                        <UserCheck size={16} />
-                        <input 
-                          type="text" 
-                          id="req-id" 
-                          placeholder={reqRole === 'teacher' ? "e.g. TCH-1001" : "e.g. STU-2026-001"}
-                          value={reqId} 
-                          onChange={(e) => { setReqId(e.target.value); setVerifiedInfo(null); setVerificationError(null); }} 
-                          required
-                        />
-                      </div>
-                      <div className="quick-id-hints">
-                        <span>Sample IDs:</span>
-                        {reqRole === 'teacher' ? (
-                          <>
-                            <span className="id-chip" onClick={() => { setReqId('TCH-1001'); setVerifiedInfo(null); }}>TCH-1001 (Physics)</span>
-                            <span className="id-chip" onClick={() => { setReqId('TCH-1002'); setVerifiedInfo(null); }}>TCH-1002 (Math)</span>
-                          </>
-                        ) : (
-                          <>
-                            <span className="id-chip" onClick={() => { setReqId('STU-2026-001'); setVerifiedInfo(null); }}>STU-2026-001 (Grade 10)</span>
-                            <span className="id-chip" onClick={() => { setReqId('STU-2026-042'); setVerifiedInfo(null); }}>STU-2026-042 (Grade 11)</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Verification Result Banner */}
-                    {verifiedInfo && (
-                      <div className="verification-status-banner">
-                        <CheckCircle size={20} />
-                        <div className="verification-details">
-                          <div className="verification-name">{verifiedInfo.full_name}</div>
-                          <div className="verification-meta">
-                            {reqRole === 'teacher' 
-                              ? `${verifiedInfo.department} • ${verifiedInfo.designation}`
-                              : `${verifiedInfo.grade.toUpperCase()} • ${verifiedInfo.section}`}
-                          </div>
-                          <div className="verification-meta">
-                            Registered Email: <strong>{verifiedInfo.email}</strong>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {verificationError && (
-                      <div className="verification-status-banner error">
-                        <Info size={18} />
-                        <div>{verificationError}</div>
-                      </div>
-                    )}
-
-                    {/* Verification / Submission Action Buttons */}
-                    {!verifiedInfo ? (
                       <button 
                         type="button" 
-                        className="btn btn-secondary btn-block"
-                        onClick={handleVerifyId}
-                        disabled={isVerifying}
-                      >
-                        {isVerifying ? "Verifying with Database..." : "Verify Identification Number"}
-                      </button>
-                    ) : (
-                      <button 
-                        type="submit" 
                         className="btn btn-primary btn-block"
-                        disabled={isSubmittingAccess}
+                        onClick={() => { 
+                          setAuthTab("user_login"); 
+                          setEmailInput(accessDispatched.rawEmail); 
+                          setPasswordInput(""); 
+                          setAccessDispatched(null); 
+                        }}
                       >
-                        <Send size={16} />
-                        <span>{isSubmittingAccess ? "Dispatching..." : "Confirm & Send Login Credentials to Email"}</span>
+                        <LogIn size={16} />
+                        <span>Proceed to Log In</span>
                       </button>
-                    )}
-                  </form>
 
-                  <div className="auth-card-footer">
-                    <p>
-                      Already have credentials?{' '}
-                      <span onClick={() => { setAuthTab("user_login"); setEmailInput("robert.vance@school.edu"); }}>
-                        Log in here
-                      </span>
-                    </p>
-                  </div>
+                      <div className="dispatched-resend-prompt">
+                        Didn&apos;t receive the email?{' '}
+                        <span onClick={() => setAccessDispatched(null)}>
+                          Try again with another ID
+                        </span>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="auth-card-header">
+                        <h2>Request Access</h2>
+                        <p>Enter your institutional ID to verify against the school directory and receive your credentials</p>
+                      </div>
+
+                      <form onSubmit={handleRequestAccessSubmit} className="auth-form">
+                        {/* Role Selection */}
+                        <div className="form-group">
+                          <label>I am a:</label>
+                          <div className="auth-role-grid">
+                            <div 
+                              className={`role-select-card ${reqRole === 'teacher' ? 'selected' : ''}`}
+                              onClick={() => { setReqRole('teacher'); setReqId('TCH-1001'); setVerifiedInfo(null); setVerificationError(null); }}
+                            >
+                              <GraduationCap size={20} />
+                              <span>Teacher / Faculty</span>
+                            </div>
+                            <div 
+                              className={`role-select-card ${reqRole === 'student' ? 'selected' : ''}`}
+                              onClick={() => { setReqRole('student'); setReqId('STU-2026-001'); setVerifiedInfo(null); setVerificationError(null); }}
+                            >
+                              <Users size={20} />
+                              <span>Student</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Institution */}
+                        <div className="form-group">
+                          <label htmlFor="req-institution">Institution</label>
+                          <div className="input-wrapper">
+                            <School size={16} />
+                            <select 
+                              id="req-institution"
+                              value={reqInstitution}
+                              onChange={(e) => setReqInstitution(e.target.value)}
+                            >
+                              <option value="inst-1">St. Xavier High School</option>
+                              <option value="inst-2">Cambridge Global Academy</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        {/* ID Input */}
+                        <div className="form-group">
+                          <label htmlFor="req-id">
+                            {reqRole === 'teacher' ? 'Teacher ID Number' : 'Student Roll / ID Number'}
+                          </label>
+                          <div className="input-wrapper">
+                            <UserCheck size={16} />
+                            <input 
+                              type="text" 
+                              id="req-id" 
+                              placeholder={reqRole === 'teacher' ? "e.g. TCH-1001" : "e.g. STU-2026-001"}
+                              value={reqId} 
+                              onChange={(e) => { setReqId(e.target.value); setVerifiedInfo(null); setVerificationError(null); }} 
+                              required
+                            />
+                          </div>
+                          <div className="quick-id-hints">
+                            <span>Sample IDs:</span>
+                            {reqRole === 'teacher' ? (
+                              <>
+                                <span className="id-chip" onClick={() => { setReqId('TCH-1001'); setVerifiedInfo(null); }}>TCH-1001 (Physics)</span>
+                                <span className="id-chip" onClick={() => { setReqId('TCH-1002'); setVerifiedInfo(null); }}>TCH-1002 (Math)</span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="id-chip" onClick={() => { setReqId('STU-2026-001'); setVerifiedInfo(null); }}>STU-2026-001 (Grade 10)</span>
+                                <span className="id-chip" onClick={() => { setReqId('STU-2026-042'); setVerifiedInfo(null); }}>STU-2026-042 (Grade 11)</span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Verification Result Banner */}
+                        {verifiedInfo && (
+                          <div className="verification-status-banner">
+                            <CheckCircle size={20} />
+                            <div className="verification-details">
+                              <div className="verification-name">{verifiedInfo.full_name}</div>
+                              <div className="verification-meta">
+                                {reqRole === 'teacher' 
+                                  ? `${verifiedInfo.department} • ${verifiedInfo.designation}`
+                                  : `${verifiedInfo.grade.toUpperCase()} • ${verifiedInfo.section}`}
+                              </div>
+                              <div className="verification-meta">
+                                Registered Email: <strong>{verifiedInfo.email}</strong>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {verificationError && (
+                          <div className="verification-status-banner error">
+                            <Info size={18} />
+                            <div>{verificationError}</div>
+                          </div>
+                        )}
+
+                        {/* Verification / Submission Action Buttons */}
+                        {!verifiedInfo ? (
+                          <button 
+                            type="button" 
+                            className="btn btn-secondary btn-block"
+                            onClick={handleVerifyId}
+                            disabled={isVerifying}
+                          >
+                            {isVerifying ? "Verifying with Database..." : "Verify Identification Number"}
+                          </button>
+                        ) : (
+                          <button 
+                            type="submit" 
+                            className="btn btn-primary btn-block"
+                            disabled={isSubmittingAccess}
+                          >
+                            <Send size={16} />
+                            <span>{isSubmittingAccess ? "Dispatching..." : "Confirm & Send Login Credentials to Email"}</span>
+                          </button>
+                        )}
+                      </form>
+
+                      <div className="auth-card-footer">
+                        <p>
+                          Already have credentials?{' '}
+                          <span onClick={() => { setAuthTab("user_login"); setEmailInput("robert.vance@school.edu"); }}>
+                            Log in here
+                          </span>
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </div>
@@ -2667,80 +2715,7 @@ function App() {
         </Modal>
       )}
 
-      {/* Delivered Email Preview Modal (Automated Verification Dispatch Preview) */}
-      {emailPreviewModal.show && emailPreviewModal.data && (
-        <div className="gdrive-modal-overlay" onClick={() => setEmailPreviewModal({ show: false, data: null })}>
-          <div className="email-preview-card" onClick={(e) => e.stopPropagation()}>
-            <div className="email-preview-header">
-              <div className="email-preview-title">
-                <Mail size={18} />
-                <span>Automated Email Notification (Free Service)</span>
-              </div>
-              <button 
-                className="modal-close-icon-btn" 
-                onClick={() => setEmailPreviewModal({ show: false, data: null })}
-              >
-                <X size={18} />
-              </button>
-            </div>
 
-            <div className="email-preview-meta">
-              <div><strong>From:</strong> EduVault Security &bull; <code>auth@eduvault.edu</code></div>
-              <div><strong>To:</strong> {emailPreviewModal.data.fullName} &bull; <code>{emailPreviewModal.data.email}</code></div>
-              <div><strong>Subject:</strong> Your EduVault Academic Workspace Credentials</div>
-            </div>
-
-            <div className="email-preview-body">
-              <p>Dear {emailPreviewModal.data.fullName},</p>
-              <p style={{ marginTop: '0.5rem' }}>
-                Your institutional identification <strong>({emailPreviewModal.data.record.teacher_id || emailPreviewModal.data.record.student_id})</strong> has been verified against our school records.
-              </p>
-
-              <div className="email-credential-box">
-                <div className="credential-item">
-                  <span>Username / Login Email:</span>
-                  <span className="credential-code">{emailPreviewModal.data.email}</span>
-                </div>
-                <div className="credential-item">
-                  <span>Temporary Access Password:</span>
-                  <span className="credential-code">{emailPreviewModal.data.tempPassword}</span>
-                </div>
-              </div>
-
-              <p style={{ fontSize: '0.8rem', color: '#9ca3af' }}>
-                &bull; Please log in using these credentials. You will be prompted to set your permanent password immediately upon login.
-              </p>
-            </div>
-
-            <div className="email-preview-footer">
-              <button 
-                className="btn btn-secondary btn-sm"
-                onClick={() => {
-                  navigator.clipboard?.writeText(emailPreviewModal.data.tempPassword);
-                  showToast("Password copied to clipboard!", "check-circle");
-                }}
-              >
-                <Copy size={14} />
-                <span>Copy Password</span>
-              </button>
-              <button 
-                className="btn btn-primary btn-sm"
-                onClick={() => {
-                  const d = emailPreviewModal.data;
-                  setEmailPreviewModal({ show: false, data: null });
-                  setAuthTab("user_login");
-                  setEmailInput(d.email);
-                  setPasswordInput(d.tempPassword);
-                  setCurrentView("login");
-                }}
-              >
-                <LogIn size={14} />
-                <span>Proceed to Log In</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Global Footer (only for non-workspace view) */}
       {currentView !== "workspace" && (

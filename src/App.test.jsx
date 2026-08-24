@@ -146,11 +146,15 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(sendBtn).toBeInTheDocument();
     fireEvent.click(sendBtn);
 
-    // Verify delivered email preview modal opens
+    // Verify secure confirmation screen appears with masked email and 2-layer security notice
     await waitFor(() => {
-      expect(screen.getByText(/Automated Email Notification \(Free Service\)/i)).toBeInTheDocument();
-      expect(screen.getByText(/Your EduVault Academic Workspace Credentials/i)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Credentials Dispatched!/i })).toBeInTheDocument();
+      expect(screen.getByText(/Two-Layer Security Protection/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Proceed to Log In/i })).toBeInTheDocument();
     });
+
+    // Verify credentials/password are NOT exposed on screen
+    expect(screen.queryByText(/EduVault-/i)).not.toBeInTheDocument();
   });
 
   it('should show error when verifying invalid identification number', async () => {

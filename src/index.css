@@ -968,6 +968,91 @@ body {
     color: #6ee7b7;
 }
 
+/* Secure Access Dispatched Confirmation Screen */
+.access-dispatched-screen {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    padding: 1rem 0.5rem;
+    animation: fadeIn 0.25s ease-out;
+}
+
+.success-icon-circle {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: rgba(16, 185, 129, 0.12);
+    border: 2px solid rgba(16, 185, 129, 0.3);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 1.25rem;
+    box-shadow: 0 0 24px rgba(16, 185, 129, 0.2);
+}
+
+.access-dispatched-screen h3 {
+    font-family: var(--font-heading);
+    font-size: 1.45rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.5rem;
+}
+
+.dispatched-main-msg {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    margin-bottom: 1.25rem;
+}
+
+.dispatched-email-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid rgba(59, 130, 246, 0.25);
+    padding: 0.6rem 1.25rem;
+    border-radius: 30px;
+    font-family: monospace;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: #93c5fd;
+    margin-bottom: 1.5rem;
+}
+
+.security-notice-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    background: rgba(30, 41, 59, 0.7);
+    border: 1px solid rgba(148, 163, 184, 0.15);
+    border-radius: 12px;
+    padding: 0.9rem 1rem;
+    text-align: left;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: #cbd5e1;
+    margin-bottom: 1.75rem;
+}
+
+.security-notice-box svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.dispatched-resend-prompt {
+    margin-top: 1.25rem;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.dispatched-resend-prompt span {
+    color: var(--accent-blue);
+    cursor: pointer;
+    text-decoration: underline;
+}
+
 /* Email Preview Simulation Modal */
 .email-preview-card {
     background: #0f111a;
