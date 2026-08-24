@@ -1,6 +1,7 @@
 -- ==============================================================================
 -- EduVault Database Schema & RLS Setup (Supabase PostgreSQL)
 -- Multi-Role Authentication, Roster ID Verification & Document Storage
+-- (Idempotent: Safe to run and re-run multiple times)
 -- ==============================================================================
 
 -- Enable UUID extension
@@ -21,18 +22,26 @@ create table if not exists public.profiles (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- Ensure columns exist if table was already created in earlier step
+alter table public.profiles add column if not exists role text default 'student';
+alter table public.profiles add column if not exists institutional_id text;
+alter table public.profiles add column if not exists must_change_password boolean default false;
+
 -- Enable RLS on profiles
 alter table public.profiles enable row level security;
 
--- Profiles Policies
+-- Profiles Policies (Drop if exists first to avoid 42710 error)
+drop policy if exists "Public profiles are viewable by everyone" on public.profiles;
 create policy "Public profiles are viewable by everyone"
   on public.profiles for select
   using (true);
 
+drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
   on public.profiles for update
   using (auth.uid() = id);
 
+drop policy if exists "Users can insert their own profile" on public.profiles;
 create policy "Users can insert their own profile"
   on public.profiles for insert
   with check (auth.uid() = id);
@@ -85,10 +94,12 @@ create table if not exists public.teachers (
 -- Enable RLS on teachers table
 alter table public.teachers enable row level security;
 
+drop policy if exists "Teachers roster is viewable by all for ID validation" on public.teachers;
 create policy "Teachers roster is viewable by all for ID validation"
   on public.teachers for select
   using (true);
 
+drop policy if exists "Teachers roster can be updated upon registration" on public.teachers;
 create policy "Teachers roster can be updated upon registration"
   on public.teachers for update
   using (true);
@@ -111,10 +122,12 @@ create table if not exists public.students (
 -- Enable RLS on students table
 alter table public.students enable row level security;
 
+drop policy if exists "Students roster is viewable by all for ID validation" on public.students;
 create policy "Students roster is viewable by all for ID validation"
   on public.students for select
   using (true);
 
+drop policy if exists "Students roster can be updated upon registration" on public.students;
 create policy "Students roster can be updated upon registration"
   on public.students for update
   using (true);
@@ -135,10 +148,12 @@ create table if not exists public.access_requests (
 -- Enable RLS on access_requests
 alter table public.access_requests enable row level security;
 
+drop policy if exists "Access requests are viewable by everyone" on public.access_requests;
 create policy "Access requests are viewable by everyone"
   on public.access_requests for select
   using (true);
 
+drop policy if exists "Access requests can be inserted by anyone" on public.access_requests;
 create policy "Access requests can be inserted by anyone"
   on public.access_requests for insert
   with check (true);
@@ -166,18 +181,22 @@ create table if not exists public.documents (
 -- Enable RLS on documents
 alter table public.documents enable row level security;
 
+drop policy if exists "Documents are viewable by everyone" on public.documents;
 create policy "Documents are viewable by everyone"
   on public.documents for select
   using (true);
 
+drop policy if exists "Authenticated users can insert documents" on public.documents;
 create policy "Authenticated users can insert documents"
   on public.documents for insert
   with check (auth.role() = 'authenticated' or auth.uid() is null);
 
+drop policy if exists "Users can update documents" on public.documents;
 create policy "Users can update documents"
   on public.documents for update
   using (auth.uid() = user_id or auth.uid() is not null);
 
+drop policy if exists "Users can delete documents" on public.documents;
 create policy "Users can delete documents"
   on public.documents for delete
   using (auth.uid() = user_id or auth.uid() is not null);
@@ -193,7 +212,12 @@ values
   ('TCH-1002', 'Prof. Sarah Jenkins', 'sarah.jenkins@school.edu', 'inst-1', 'Mathematics', 'Senior Lecturer', 'unregistered'),
   ('TCH-1003', 'Dr. Marcus Reynolds', 'marcus.reynolds@school.edu', 'inst-1', 'Chemistry', 'Lab Director', 'unregistered'),
   ('TCH-2001', 'Elena Rostova', 'elena.rostova@cambridge.edu', 'inst-2', 'Computer Science', 'Lead Faculty', 'unregistered')
-on conflict (teacher_id) do nothing;
+on conflict (teacher_id) do update
+set 
+  full_name = excluded.full_name,
+  email = excluded.email,
+  department = excluded.department,
+  designation = excluded.designation;
 
 -- Seed Students Roster
 insert into public.students (student_id, full_name, email, institution, grade, section, status)
@@ -202,7 +226,12 @@ values
   ('STU-2026-002', 'Liam Miller', 'liam.miller@student.edu', 'inst-1', 'grade-10', 'Section A', 'unregistered'),
   ('STU-2026-042', 'Sophia Rodriguez', 'sophia.rodriguez@student.edu', 'inst-1', 'grade-11', 'Science', 'unregistered'),
   ('STU-2026-099', 'David Kim', 'david.kim@student.edu', 'inst-1', 'grade-12', 'Commerce', 'unregistered')
-on conflict (student_id) do nothing;
+on conflict (student_id) do update
+set 
+  full_name = excluded.full_name,
+  email = excluded.email,
+  grade = excluded.grade,
+  section = excluded.section;
 
 -- Seed Documents
 insert into public.documents (title, institution, academic_year, class_grade, subject, timeline, file_type, file_size, created_at)
