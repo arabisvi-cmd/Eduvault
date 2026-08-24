@@ -7,9 +7,17 @@ import {
   Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, Sparkles, X, Check,
-  Share2, FolderInput, Copy, Pencil, ExternalLink
+  Share2, FolderInput, Copy, Pencil, ExternalLink,
+  Crown, GraduationCap, UserCheck, KeyRound, Send
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { 
+  verifyInstitutionalId, 
+  processAccessRequest, 
+  authenticateUser, 
+  updatePassword, 
+  ADMIN_CREDENTIALS 
+} from './lib/authService';
 
 const INITIAL_FOLDERS = [
   { id: "folder-1", name: "Physics Lecture Slides", path: "in EduVault Drive" },
@@ -341,13 +349,34 @@ function App() {
   
   // Navigation & Authentication states
   const [currentView, setCurrentView] = useState("home"); // 'home', 'workspace', 'login', 'signup'
-  const [currentUser, setCurrentUser] = useState(null); // Simulated logged in user email
+  const [currentUser, setCurrentUser] = useState(null); // Logged in user email
+  const [currentUserRole, setCurrentUserRole] = useState(null); // 'admin' | 'teacher' | 'student'
+  const [currentUserName, setCurrentUserName] = useState("");
   
-  // Form states
+  // Auth view mode tabs: 'user_login' | 'admin_login' | 'request_access'
+  const [authTab, setAuthTab] = useState("user_login");
+  
+  // Form states (Login)
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
-  const [nameInput, setNameInput] = useState("");
-  const [institutionInput, setInstitutionInput] = useState("inst-1");
+
+  // Form states (Request Access / Registration by ID)
+  const [reqRole, setReqRole] = useState("teacher"); // 'teacher' | 'student'
+  const [reqId, setReqId] = useState("");
+  const [reqInstitution, setReqInstitution] = useState("inst-1");
+  const [verifiedInfo, setVerifiedInfo] = useState(null);
+  const [verificationError, setVerificationError] = useState(null);
+  const [isVerifying, setIsVerifying] = useState(false);
+  const [isSubmittingAccess, setIsSubmittingAccess] = useState(false);
+
+  // First-Time Password Reset Modal
+  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
+
+  // Delivered Email Preview Modal
+  const [emailPreviewModal, setEmailPreviewModal] = useState({ show: false, data: null });
 
   // Toast System
   const [toast, setToast] = useState({ show: false, message: "", icon: "info" });
@@ -712,56 +741,114 @@ function App() {
       return;
     }
 
-    if (isSupabaseConfigured && supabase) {
-      try {
-        if (currentView === "login") {
-          const { data, error } = await supabase.auth.signInWithPassword({
-            email: emailInput,
-            password: passwordInput
-          });
-          if (error) {
-            showToast(error.message, "info");
-            return;
-          }
-          setCurrentUser(data.user?.email || emailInput);
-          showToast(`Welcome back, ${data.user?.email || emailInput}!`, "check-circle");
-        } else {
-          const { data, error } = await supabase.auth.signUp({
-            email: emailInput,
-            password: passwordInput,
-            options: {
-              data: {
-                full_name: nameInput,
-                institution: institutionInput
-              }
-            }
-          });
-          if (error) {
-            showToast(error.message, "info");
-            return;
-          }
-          setCurrentUser(data.user?.email || emailInput);
-          showToast(`Account created successfully for ${emailInput}!`, "check-circle");
-        }
-      } catch (err) {
-        showToast(err.message || "Authentication error", "info");
-        return;
-      }
-    } else {
-      // Fallback for local simulation
-      if (currentView === "login") {
-        setCurrentUser(emailInput);
-        showToast(`Welcome back, ${emailInput}!`, "check-circle");
-      } else {
-        setCurrentUser(emailInput);
-        showToast(`Account created successfully for ${emailInput}!`, "check-circle");
-      }
+    const loginType = authTab === "admin_login" ? "admin" : "user";
+    const res = await authenticateUser({
+      email: emailInput,
+      password: passwordInput,
+      loginType: loginType
+    });
+
+    if (!res.success) {
+      showToast(res.error || "Authentication failed", "info");
+      return;
     }
-    
+
+    const user = res.user;
+    setCurrentUser(user.email);
+    setCurrentUserRole(user.role);
+    setCurrentUserName(user.full_name || user.email.split('@')[0]);
+
+    if (user.must_change_password) {
+      setShowPasswordChangeModal(true);
+      showToast(`Welcome, ${user.full_name || user.email}! Please set your new password.`, "check-circle");
+    } else {
+      showToast(`Welcome back, ${user.full_name || user.email}!`, "check-circle");
+      setCurrentView("workspace");
+    }
+
     setEmailInput("");
     setPasswordInput("");
-    setNameInput("");
-    setCurrentView("home");
+  };
+
+  const handleVerifyId = async () => {
+    if (!reqId.trim()) {
+      setVerificationError("Please enter your Identification Number (e.g. TCH-1001 or STU-2026-001)");
+      setVerifiedInfo(null);
+      return;
+    }
+
+    setIsVerifying(true);
+    setVerificationError(null);
+    setVerifiedInfo(null);
+
+    const res = await verifyInstitutionalId(reqRole, reqId);
+    setIsVerifying(false);
+
+    if (res.success) {
+      setVerifiedInfo(res.record);
+      showToast(`Verified: ${res.record.full_name}`, "check-circle");
+    } else {
+      setVerificationError(res.error);
+    }
+  };
+
+  const handleRequestAccessSubmit = async (e) => {
+    e.preventDefault();
+    if (!reqId.trim()) {
+      showToast("Please enter your Identification Number", "info");
+      return;
+    }
+
+    setIsSubmittingAccess(true);
+    const res = await processAccessRequest({
+      role: reqRole,
+      institutionalId: reqId
+    });
+    setIsSubmittingAccess(false);
+
+    if (!res.success) {
+      showToast(res.error || "Request failed", "info");
+      return;
+    }
+
+    showToast(`Access credentials dispatched to ${res.email}!`, "check-circle");
+    
+    // Open Delivered Email Preview Modal for instant testing
+    setEmailPreviewModal({
+      show: true,
+      data: res
+    });
+
+    setReqId("");
+    setVerifiedInfo(null);
+    setVerificationError(null);
+  };
+
+  const handlePasswordChangeSubmit = async (e) => {
+    e.preventDefault();
+    if (!newPassword || newPassword.length < 6) {
+      showToast("Password must be at least 6 characters long", "info");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      showToast("Passwords do not match", "info");
+      return;
+    }
+
+    setIsUpdatingPassword(true);
+    const res = await updatePassword(newPassword);
+    setIsUpdatingPassword(false);
+
+    if (!res.success) {
+      showToast(res.error || "Failed to update password", "info");
+      return;
+    }
+
+    setShowPasswordChangeModal(false);
+    setNewPassword("");
+    setConfirmPassword("");
+    showToast("Password updated successfully! Welcome to EduVault.", "check-circle");
+    setCurrentView("workspace");
   };
 
   const handleLogout = async () => {
@@ -773,6 +860,8 @@ function App() {
       }
     }
     setCurrentUser(null);
+    setCurrentUserRole(null);
+    setCurrentUserName("");
     showToast("Logged out successfully", "info");
   };
 
@@ -948,22 +1037,67 @@ function App() {
           <div className="header-actions">
             {currentUser ? (
               <div className="user-profile-header">
+                {currentUserRole === 'admin' ? (
+                  <span className="role-badge-pill admin">
+                    <Crown size={13} />
+                    Principal
+                  </span>
+                ) : currentUserRole === 'teacher' ? (
+                  <span className="role-badge-pill teacher">
+                    <GraduationCap size={13} />
+                    Teacher
+                  </span>
+                ) : (
+                  <span className="role-badge-pill student">
+                    <Users size={13} />
+                    Student
+                  </span>
+                )}
                 <button className="btn btn-secondary" onClick={handleLogout}>
                   <Mail size={16} />
-                  <span>{currentUser} (Logout)</span>
+                  <span>{currentUserName || currentUser} (Logout)</span>
                 </button>
               </div>
             ) : (
               <>
                 {(currentView === "home" || currentView === "workspace") ? (
                   <>
-                    <button className="btn btn-secondary" onClick={() => { setCurrentView("login"); setEmailInput("arabisvi@gmail.com"); }}>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => { 
+                        setAuthTab("admin_login"); 
+                        setEmailInput(ADMIN_CREDENTIALS.email); 
+                        setPasswordInput("admin123"); 
+                        setCurrentView("login"); 
+                      }}
+                      title="Principal / Administrator Login"
+                    >
+                      <Crown size={15} color="#facc15" />
+                      <span>Admin</span>
+                    </button>
+                    <button 
+                      className="btn btn-secondary" 
+                      onClick={() => { 
+                        setAuthTab("user_login"); 
+                        setEmailInput("robert.vance@school.edu"); 
+                        setPasswordInput("password123"); 
+                        setCurrentView("login"); 
+                      }}
+                    >
                       <LogIn size={16} />
                       <span>Log In</span>
                     </button>
-                    <button className="btn btn-primary" onClick={() => setCurrentView("signup")}>
+                    <button 
+                      className="btn btn-primary" 
+                      onClick={() => { 
+                        setAuthTab("request_access"); 
+                        setReqRole("teacher"); 
+                        setReqId("TCH-1001"); 
+                        setCurrentView("signup"); 
+                      }}
+                    >
                       <UserPlus size={16} />
-                      <span>Sign Up</span>
+                      <span>Request Access</span>
                     </button>
                   </>
                 ) : (
@@ -1924,100 +2058,299 @@ function App() {
             </main>
           </div>
         ) : (
-          /* Authentication Screen */
+          /* Multi-Role Authentication Screen */
           <section className="auth-section">
-            <div className="auth-card">
-              <div className="auth-card-header">
-                <h2>{currentView === "login" ? "Welcome Back" : "Create Account"}</h2>
-                <p>
-                  {currentView === "login" 
-                    ? "Access your secure academic vault workspace" 
-                    : "Register your institution with EduVault"}
-                </p>
+            <div className={`auth-card ${authTab === 'admin_login' ? 'admin-mode' : ''}`}>
+              {/* Auth Mode Tabs */}
+              <div className="auth-tabs">
+                <button 
+                  type="button"
+                  className={`auth-tab-btn ${authTab === 'user_login' ? 'active' : ''}`}
+                  onClick={() => { 
+                    setAuthTab('user_login'); 
+                    setEmailInput("robert.vance@school.edu"); 
+                    setPasswordInput("password123"); 
+                  }}
+                >
+                  <LogIn size={15} />
+                  <span>User Login</span>
+                </button>
+                <button 
+                  type="button"
+                  className={`auth-tab-btn ${authTab === 'admin_login' ? 'admin-active' : ''}`}
+                  onClick={() => { 
+                    setAuthTab('admin_login'); 
+                    setEmailInput(ADMIN_CREDENTIALS.email); 
+                    setPasswordInput("admin123"); 
+                  }}
+                >
+                  <Crown size={15} />
+                  <span>Admin Portal</span>
+                </button>
+                <button 
+                  type="button"
+                  className={`auth-tab-btn ${authTab === 'request_access' ? 'active' : ''}`}
+                  onClick={() => { 
+                    setAuthTab('request_access'); 
+                    setReqRole("teacher"); 
+                    setReqId("TCH-1001"); 
+                  }}
+                >
+                  <UserCheck size={15} />
+                  <span>Request Access</span>
+                </button>
               </div>
 
-              <form onSubmit={handleAuthSubmit} className="auth-form">
-                {currentView === "signup" && (
-                  <>
+              {/* Tab 1: Standard User Login (Teacher / Student) */}
+              {authTab === "user_login" && (
+                <>
+                  <div className="auth-card-header">
+                    <h2>Welcome to EduVault</h2>
+                    <p>Access your secure academic vault workspace</p>
+                  </div>
+
+                  <form onSubmit={handleAuthSubmit} className="auth-form">
                     <div className="form-group">
-                      <label htmlFor="fullname">Full Name</label>
+                      <label htmlFor="email">Email Address</label>
                       <div className="input-wrapper">
-                        <Users size={16} />
+                        <Mail size={16} />
                         <input 
-                          type="text" 
-                          id="fullname" 
-                          placeholder="John Doe" 
-                          value={nameInput} 
-                          onChange={(e) => setNameInput(e.target.value)} 
+                          type="email" 
+                          id="email" 
+                          placeholder="you@school.edu" 
+                          value={emailInput} 
+                          onChange={(e) => setEmailInput(e.target.value)} 
+                          required
+                        />
+                      </div>
+                      <div className="quick-id-hints">
+                        <span>Quick Demo:</span>
+                        <span className="id-chip" onClick={() => { setEmailInput("robert.vance@school.edu"); setPasswordInput("password123"); }}>Teacher (Robert)</span>
+                        <span className="id-chip" onClick={() => { setEmailInput("alice.chen@student.edu"); setPasswordInput("password123"); }}>Student (Alice)</span>
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="password">Password</label>
+                      <div className="input-wrapper">
+                        <Lock size={16} />
+                        <input 
+                          type="password" 
+                          id="password" 
+                          placeholder="••••••••" 
+                          value={passwordInput} 
+                          onChange={(e) => setPasswordInput(e.target.value)} 
                           required
                         />
                       </div>
                     </div>
+
+                    <button type="submit" className="btn btn-primary btn-block">
+                      Log In to Workspace
+                    </button>
+                  </form>
+
+                  <div className="auth-card-footer">
+                    <p>
+                      First time here?{' '}
+                      <span onClick={() => { setAuthTab("request_access"); setReqRole("teacher"); setReqId("TCH-1001"); }}>
+                        Request Access with Institutional ID
+                      </span>
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Tab 2: Principal / Admin Portal Login */}
+              {authTab === "admin_login" && (
+                <>
+                  <div className="auth-card-header">
+                    <h2>Principal Portal</h2>
+                    <p>Institutional Administrator & Governance Access</p>
+                  </div>
+
+                  <form onSubmit={handleAuthSubmit} className="auth-form">
                     <div className="form-group">
-                      <label htmlFor="auth-institution">Institution</label>
+                      <label htmlFor="admin-email">Administrator Email</label>
+                      <div className="input-wrapper">
+                        <Crown size={16} color="#facc15" />
+                        <input 
+                          type="email" 
+                          id="admin-email" 
+                          placeholder="principal@school.edu" 
+                          value={emailInput} 
+                          onChange={(e) => setEmailInput(e.target.value)} 
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <div className="form-group">
+                      <label htmlFor="admin-password">Administrative Password</label>
+                      <div className="input-wrapper">
+                        <Lock size={16} />
+                        <input 
+                          type="password" 
+                          id="admin-password" 
+                          placeholder="••••••••" 
+                          value={passwordInput} 
+                          onChange={(e) => setPasswordInput(e.target.value)} 
+                          required
+                        />
+                      </div>
+                    </div>
+
+                    <button type="submit" className="btn btn-primary btn-block" style={{ background: 'linear-gradient(135deg, #eab308, #ca8a04)', color: '#000', fontWeight: 700 }}>
+                      Log In as Principal
+                    </button>
+                  </form>
+
+                  <div className="auth-card-footer">
+                    <p>
+                      Faculty or Student?{' '}
+                      <span onClick={() => { setAuthTab("user_login"); setEmailInput("robert.vance@school.edu"); }}>
+                        Standard User Login
+                      </span>
+                    </p>
+                  </div>
+                </>
+              )}
+
+              {/* Tab 3: First-Time User Registration / Request Access */}
+              {authTab === "request_access" && (
+                <>
+                  <div className="auth-card-header">
+                    <h2>Request Access</h2>
+                    <p>Enter your institutional ID to verify against the school directory and receive your credentials</p>
+                  </div>
+
+                  <form onSubmit={handleRequestAccessSubmit} className="auth-form">
+                    {/* Role Selection */}
+                    <div className="form-group">
+                      <label>I am a:</label>
+                      <div className="auth-role-grid">
+                        <div 
+                          className={`role-select-card ${reqRole === 'teacher' ? 'selected' : ''}`}
+                          onClick={() => { setReqRole('teacher'); setReqId('TCH-1001'); setVerifiedInfo(null); setVerificationError(null); }}
+                        >
+                          <GraduationCap size={20} />
+                          <span>Teacher / Faculty</span>
+                        </div>
+                        <div 
+                          className={`role-select-card ${reqRole === 'student' ? 'selected' : ''}`}
+                          onClick={() => { setReqRole('student'); setReqId('STU-2026-001'); setVerifiedInfo(null); setVerificationError(null); }}
+                        >
+                          <Users size={20} />
+                          <span>Student</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Institution */}
+                    <div className="form-group">
+                      <label htmlFor="req-institution">Institution</label>
                       <div className="input-wrapper">
                         <School size={16} />
                         <select 
-                          id="auth-institution"
-                          value={institutionInput}
-                          onChange={(e) => setInstitutionInput(e.target.value)}
+                          id="req-institution"
+                          value={reqInstitution}
+                          onChange={(e) => setReqInstitution(e.target.value)}
                         >
                           <option value="inst-1">St. Xavier High School</option>
                           <option value="inst-2">Cambridge Global Academy</option>
                         </select>
                       </div>
                     </div>
-                  </>
-                )}
 
-                <div className="form-group">
-                  <label htmlFor="email">Email Address</label>
-                  <div className="input-wrapper">
-                    <Mail size={16} />
-                    <input 
-                      type="email" 
-                      id="email" 
-                      placeholder="you@school.edu" 
-                      value={emailInput} 
-                      onChange={(e) => setEmailInput(e.target.value)} 
-                      required
-                    />
+                    {/* ID Input */}
+                    <div className="form-group">
+                      <label htmlFor="req-id">
+                        {reqRole === 'teacher' ? 'Teacher ID Number' : 'Student Roll / ID Number'}
+                      </label>
+                      <div className="input-wrapper">
+                        <UserCheck size={16} />
+                        <input 
+                          type="text" 
+                          id="req-id" 
+                          placeholder={reqRole === 'teacher' ? "e.g. TCH-1001" : "e.g. STU-2026-001"}
+                          value={reqId} 
+                          onChange={(e) => { setReqId(e.target.value); setVerifiedInfo(null); setVerificationError(null); }} 
+                          required
+                        />
+                      </div>
+                      <div className="quick-id-hints">
+                        <span>Sample IDs:</span>
+                        {reqRole === 'teacher' ? (
+                          <>
+                            <span className="id-chip" onClick={() => { setReqId('TCH-1001'); setVerifiedInfo(null); }}>TCH-1001 (Physics)</span>
+                            <span className="id-chip" onClick={() => { setReqId('TCH-1002'); setVerifiedInfo(null); }}>TCH-1002 (Math)</span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="id-chip" onClick={() => { setReqId('STU-2026-001'); setVerifiedInfo(null); }}>STU-2026-001 (Grade 10)</span>
+                            <span className="id-chip" onClick={() => { setReqId('STU-2026-042'); setVerifiedInfo(null); }}>STU-2026-042 (Grade 11)</span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Verification Result Banner */}
+                    {verifiedInfo && (
+                      <div className="verification-status-banner">
+                        <CheckCircle size={20} />
+                        <div className="verification-details">
+                          <div className="verification-name">{verifiedInfo.full_name}</div>
+                          <div className="verification-meta">
+                            {reqRole === 'teacher' 
+                              ? `${verifiedInfo.department} • ${verifiedInfo.designation}`
+                              : `${verifiedInfo.grade.toUpperCase()} • ${verifiedInfo.section}`}
+                          </div>
+                          <div className="verification-meta">
+                            Registered Email: <strong>{verifiedInfo.email}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {verificationError && (
+                      <div className="verification-status-banner error">
+                        <Info size={18} />
+                        <div>{verificationError}</div>
+                      </div>
+                    )}
+
+                    {/* Verification / Submission Action Buttons */}
+                    {!verifiedInfo ? (
+                      <button 
+                        type="button" 
+                        className="btn btn-secondary btn-block"
+                        onClick={handleVerifyId}
+                        disabled={isVerifying}
+                      >
+                        {isVerifying ? "Verifying with Database..." : "Verify Identification Number"}
+                      </button>
+                    ) : (
+                      <button 
+                        type="submit" 
+                        className="btn btn-primary btn-block"
+                        disabled={isSubmittingAccess}
+                      >
+                        <Send size={16} />
+                        <span>{isSubmittingAccess ? "Dispatching..." : "Confirm & Send Login Credentials to Email"}</span>
+                      </button>
+                    )}
+                  </form>
+
+                  <div className="auth-card-footer">
+                    <p>
+                      Already have credentials?{' '}
+                      <span onClick={() => { setAuthTab("user_login"); setEmailInput("robert.vance@school.edu"); }}>
+                        Log in here
+                      </span>
+                    </p>
                   </div>
-                </div>
-
-                <div className="form-group">
-                  <label htmlFor="password">Password</label>
-                  <div className="input-wrapper">
-                    <Lock size={16} />
-                    <input 
-                      type="password" 
-                      id="password" 
-                      placeholder="••••••••" 
-                      value={passwordInput} 
-                      onChange={(e) => setPasswordInput(e.target.value)} 
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button type="submit" className="btn btn-primary btn-block">
-                  {currentView === "login" ? "Log In" : "Sign Up"}
-                </button>
-              </form>
-
-              <div className="auth-card-footer">
-                {currentView === "login" ? (
-                  <p>
-                    New to EduVault?{' '}
-                    <span onClick={() => { setCurrentView("signup"); setEmailInput(""); }}>Create an account</span>
-                  </p>
-                ) : (
-                  <p>
-                    Already have an account?{' '}
-                    <span onClick={() => { setCurrentView("login"); setEmailInput("arabisvi@gmail.com"); }}>Log in instead</span>
-                  </p>
-                )}
-              </div>
+                </>
+              )}
             </div>
           </section>
         )}
@@ -2285,6 +2618,128 @@ function App() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {/* First-Time Password Reset Modal */}
+      {showPasswordChangeModal && (
+        <Modal title="Set Permanent Password" icon={KeyRound} onClose={() => {}}>
+          <form onSubmit={handlePasswordChangeSubmit}>
+            <div className="move-modal-body">
+              <p className="move-prompt-text" style={{ marginBottom: '1rem', color: '#93c5fd' }}>
+                🎉 Verification successful! For security, please choose a permanent password for your EduVault account.
+              </p>
+              
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label>New Permanent Password (min 6 characters)</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input 
+                    type="password" 
+                    placeholder="Enter new password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className="form-group" style={{ marginBottom: '1rem' }}>
+                <label>Confirm Password</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input 
+                    type="password" 
+                    placeholder="Confirm new password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="modal-actions-footer">
+              <button type="submit" className="btn btn-primary btn-sm" disabled={isUpdatingPassword}>
+                {isUpdatingPassword ? "Saving..." : "Save Password & Enter Workspace"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Delivered Email Preview Modal (Automated Verification Dispatch Preview) */}
+      {emailPreviewModal.show && emailPreviewModal.data && (
+        <div className="gdrive-modal-overlay" onClick={() => setEmailPreviewModal({ show: false, data: null })}>
+          <div className="email-preview-card" onClick={(e) => e.stopPropagation()}>
+            <div className="email-preview-header">
+              <div className="email-preview-title">
+                <Mail size={18} />
+                <span>Automated Email Notification (Free Service)</span>
+              </div>
+              <button 
+                className="modal-close-icon-btn" 
+                onClick={() => setEmailPreviewModal({ show: false, data: null })}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="email-preview-meta">
+              <div><strong>From:</strong> EduVault Security &bull; <code>auth@eduvault.edu</code></div>
+              <div><strong>To:</strong> {emailPreviewModal.data.fullName} &bull; <code>{emailPreviewModal.data.email}</code></div>
+              <div><strong>Subject:</strong> Your EduVault Academic Workspace Credentials</div>
+            </div>
+
+            <div className="email-preview-body">
+              <p>Dear {emailPreviewModal.data.fullName},</p>
+              <p style={{ marginTop: '0.5rem' }}>
+                Your institutional identification <strong>({emailPreviewModal.data.record.teacher_id || emailPreviewModal.data.record.student_id})</strong> has been verified against our school records.
+              </p>
+
+              <div className="email-credential-box">
+                <div className="credential-item">
+                  <span>Username / Login Email:</span>
+                  <span className="credential-code">{emailPreviewModal.data.email}</span>
+                </div>
+                <div className="credential-item">
+                  <span>Temporary Access Password:</span>
+                  <span className="credential-code">{emailPreviewModal.data.tempPassword}</span>
+                </div>
+              </div>
+
+              <p style={{ fontSize: '0.8rem', color: '#9ca3af' }}>
+                &bull; Please log in using these credentials. You will be prompted to set your permanent password immediately upon login.
+              </p>
+            </div>
+
+            <div className="email-preview-footer">
+              <button 
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  navigator.clipboard?.writeText(emailPreviewModal.data.tempPassword);
+                  showToast("Password copied to clipboard!", "check-circle");
+                }}
+              >
+                <Copy size={14} />
+                <span>Copy Password</span>
+              </button>
+              <button 
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  const d = emailPreviewModal.data;
+                  setEmailPreviewModal({ show: false, data: null });
+                  setAuthTab("user_login");
+                  setEmailInput(d.email);
+                  setPasswordInput(d.tempPassword);
+                  setCurrentView("login");
+                }}
+              >
+                <LogIn size={14} />
+                <span>Proceed to Log In</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Global Footer (only for non-workspace view) */}

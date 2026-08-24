@@ -10,16 +10,39 @@ vi.mock('./lib/supabase', () => ({
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
-      signInWithPassword: vi.fn().mockResolvedValue({ data: { user: { email: 'arabisvi@gmail.com' } }, error: null }),
-      signUp: vi.fn().mockResolvedValue({ data: { user: { email: 'arabisvi@gmail.com' } }, error: null }),
-      signOut: vi.fn().mockResolvedValue({ error: null })
+      signInWithPassword: vi.fn().mockImplementation(({ email }) => {
+        const isTeacher = (email || '').includes('vance');
+        const isAdmin = (email || '').includes('principal') || (email || '').includes('admin');
+        return Promise.resolve({
+          data: {
+            user: {
+              email: email,
+              user_metadata: {
+                full_name: isTeacher ? 'Dr. Robert Vance' : isAdmin ? 'Principal Arthur Davies' : 'Alice Chen',
+                role: isTeacher ? 'teacher' : isAdmin ? 'admin' : 'student',
+                must_change_password: false
+              }
+            }
+          },
+          error: null
+        });
+      }),
+      signUp: vi.fn().mockResolvedValue({ data: { user: { email: 'test@school.edu' } }, error: null }),
+      signOut: vi.fn().mockResolvedValue({ error: null }),
+      updateUser: vi.fn().mockResolvedValue({ data: { user: { email: 'test@school.edu' } }, error: null })
     },
     from: vi.fn().mockReturnValue({
       select: vi.fn().mockReturnValue({
-        order: vi.fn().mockResolvedValue({ data: [], error: null })
+        order: vi.fn().mockResolvedValue({ data: [], error: null }),
+        ilike: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null })
+        })
       }),
       insert: vi.fn().mockReturnValue({
         select: vi.fn().mockResolvedValue({ data: [], error: null })
+      }),
+      update: vi.fn().mockReturnValue({
+        eq: vi.fn().mockResolvedValue({ data: [], error: null })
       })
     })
   }
@@ -32,7 +55,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByText(/Secure Workspace for/i)).toBeInTheDocument();
   });
 
-  it('should toggle to login page when clicking Log In button', () => {
+  it('should toggle to login page and display user login by default', () => {
     render(<App />);
     
     // Find the Log In button in the navigation header
@@ -43,11 +66,11 @@ describe('EduVault App Rendering & Navigation tests', () => {
     fireEvent.click(loginBtn);
     
     // Login form title should be present
-    expect(screen.getByRole('heading', { name: /Welcome Back/i })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /Welcome to EduVault/i })).toBeInTheDocument();
     expect(screen.getByPlaceholderText('you@school.edu')).toBeInTheDocument();
   });
 
-  it('should sign in and update user context when submitting form', async () => {
+  it('should sign in as Teacher and display Teacher role badge', async () => {
     render(<App />);
     
     // Navigate to Login Page
@@ -58,16 +81,96 @@ describe('EduVault App Rendering & Navigation tests', () => {
     const emailInput = screen.getByPlaceholderText('you@school.edu');
     const passwordInput = screen.getByPlaceholderText('••••••••');
     
-    fireEvent.change(emailInput, { target: { value: 'arabisvi@gmail.com' } });
+    fireEvent.change(emailInput, { target: { value: 'robert.vance@school.edu' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
     
     // Submit form
-    const submitBtn = screen.getByRole('button', { name: 'Log In' });
+    const submitBtn = screen.getByRole('button', { name: /Log In to Workspace/i });
     fireEvent.click(submitBtn);
     
-    // Should be returned to Home page and showing user profile button in header
+    // Should display Teacher role badge and user full name
     await waitFor(() => {
-      expect(screen.getByText('arabisvi@gmail.com (Logout)')).toBeInTheDocument();
+      expect(screen.getByText('Teacher')).toBeInTheDocument();
+      expect(screen.getByText(/Dr. Robert Vance \(Logout\)/i)).toBeInTheDocument();
+    });
+  });
+
+  it('should allow Principal / Admin login and display Principal badge', async () => {
+    render(<App />);
+
+    // Click Admin in header
+    const adminBtn = screen.getByRole('button', { name: /Admin/i });
+    fireEvent.click(adminBtn);
+
+    // Verify Admin Portal view
+    expect(screen.getByRole('heading', { name: /Principal Portal/i })).toBeInTheDocument();
+
+    // Submit Admin credentials
+    const submitBtn = screen.getByRole('button', { name: /Log In as Principal/i });
+    fireEvent.click(submitBtn);
+
+    // Verify Principal badge
+    await waitFor(() => {
+      expect(screen.getByText('Principal')).toBeInTheDocument();
+      expect(screen.getByText(/Principal Arthur Davies \(Logout\)/i)).toBeInTheDocument();
+    });
+  });
+
+  it('should verify teacher ID in Request Access and show matching roster details', async () => {
+    render(<App />);
+
+    // Click Request Access in header
+    const reqAccessBtn = screen.getByRole('button', { name: /Request Access/i });
+    fireEvent.click(reqAccessBtn);
+
+    // Heading should indicate Request Access
+    expect(screen.getByRole('heading', { name: /Request Access/i })).toBeInTheDocument();
+
+    // Type Teacher ID
+    const idInput = screen.getByPlaceholderText(/e.g. TCH-1001/i);
+    fireEvent.change(idInput, { target: { value: 'TCH-1001' } });
+
+    // Click Verify button
+    const verifyBtn = screen.getByRole('button', { name: /Verify Identification Number/i });
+    fireEvent.click(verifyBtn);
+
+    // Verify matching teacher name and department appear
+    await waitFor(() => {
+      expect(screen.getByText('Dr. Robert Vance')).toBeInTheDocument();
+      expect(screen.getByText(/Physics • HOD Physics/i)).toBeInTheDocument();
+      expect(screen.getByText('robert.vance@school.edu')).toBeInTheDocument();
+    });
+
+    // Confirm & Send credentials button appears
+    const sendBtn = screen.getByRole('button', { name: /Confirm & Send Login Credentials to Email/i });
+    expect(sendBtn).toBeInTheDocument();
+    fireEvent.click(sendBtn);
+
+    // Verify delivered email preview modal opens
+    await waitFor(() => {
+      expect(screen.getByText(/Automated Email Notification \(Free Service\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Your EduVault Academic Workspace Credentials/i)).toBeInTheDocument();
+    });
+  });
+
+  it('should show error when verifying invalid identification number', async () => {
+    render(<App />);
+
+    // Click Request Access
+    const reqAccessBtn = screen.getByRole('button', { name: /Request Access/i });
+    fireEvent.click(reqAccessBtn);
+
+    // Type invalid ID
+    const idInput = screen.getByPlaceholderText(/e.g. TCH-1001/i);
+    fireEvent.change(idInput, { target: { value: 'INVALID-999' } });
+
+    // Click Verify button
+    const verifyBtn = screen.getByRole('button', { name: /Verify Identification Number/i });
+    fireEvent.click(verifyBtn);
+
+    // Verify error banner
+    await waitFor(() => {
+      expect(screen.getByText(/No record found for Teacher ID "INVALID-999"/i)).toBeInTheDocument();
     });
   });
 

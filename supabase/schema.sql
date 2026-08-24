@@ -1,5 +1,6 @@
 -- ==============================================================================
 -- EduVault Database Schema & RLS Setup (Supabase PostgreSQL)
+-- Multi-Role Authentication, Roster ID Verification & Document Storage
 -- ==============================================================================
 
 -- Enable UUID extension
@@ -10,10 +11,12 @@ create extension if not exists "uuid-ossp";
 -- ------------------------------------------------------------------------------
 create table if not exists public.profiles (
   id uuid references auth.users on delete cascade primary key,
-  email text unique,
+  email text unique not null,
   full_name text,
   institution text default 'inst-1',
-  role text default 'student',
+  role text default 'student' check (role in ('admin', 'teacher', 'student')),
+  institutional_id text,
+  must_change_password boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -38,12 +41,23 @@ create policy "Users can insert their own profile"
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email, full_name)
+  insert into public.profiles (id, email, full_name, role, institutional_id, must_change_password)
   values (
     new.id,
     new.email,
-    coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1))
-  );
+    coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
+    coalesce(new.raw_user_meta_data->>'role', 'student'),
+    new.raw_user_meta_data->>'institutional_id',
+    coalesce((new.raw_user_meta_data->>'must_change_password')::boolean, false)
+  )
+  on conflict (id) do update
+  set 
+    email = excluded.email,
+    full_name = coalesce(excluded.full_name, public.profiles.full_name),
+    role = coalesce(excluded.role, public.profiles.role),
+    institutional_id = coalesce(excluded.institutional_id, public.profiles.institutional_id),
+    must_change_password = coalesce(excluded.must_change_password, public.profiles.must_change_password),
+    updated_at = now();
   return new;
 end;
 $$ language plpgsql security definer;
@@ -54,7 +68,83 @@ create trigger on_auth_user_created
   for each row execute procedure public.handle_new_user();
 
 -- ------------------------------------------------------------------------------
--- 2. Documents Table
+-- 2. Teachers Roster Table (Pre-existing institutional directory)
+-- ------------------------------------------------------------------------------
+create table if not exists public.teachers (
+  teacher_id text primary key,
+  full_name text not null,
+  email text unique not null,
+  institution text not null default 'inst-1',
+  department text not null default 'Science',
+  designation text not null default 'Faculty',
+  status text not null default 'unregistered' check (status in ('unregistered', 'active', 'suspended')),
+  registered_at timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS on teachers table
+alter table public.teachers enable row level security;
+
+create policy "Teachers roster is viewable by all for ID validation"
+  on public.teachers for select
+  using (true);
+
+create policy "Teachers roster can be updated upon registration"
+  on public.teachers for update
+  using (true);
+
+-- ------------------------------------------------------------------------------
+-- 3. Students Roster Table (Pre-existing institutional directory)
+-- ------------------------------------------------------------------------------
+create table if not exists public.students (
+  student_id text primary key,
+  full_name text not null,
+  email text unique not null,
+  institution text not null default 'inst-1',
+  grade text not null default 'grade-10',
+  section text not null default 'Section A',
+  status text not null default 'unregistered' check (status in ('unregistered', 'active', 'suspended')),
+  registered_at timestamp with time zone,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS on students table
+alter table public.students enable row level security;
+
+create policy "Students roster is viewable by all for ID validation"
+  on public.students for select
+  using (true);
+
+create policy "Students roster can be updated upon registration"
+  on public.students for update
+  using (true);
+
+-- ------------------------------------------------------------------------------
+-- 4. Access Requests Audit Log
+-- ------------------------------------------------------------------------------
+create table if not exists public.access_requests (
+  id uuid primary key default uuid_generate_v4(),
+  role text not null check (role in ('teacher', 'student')),
+  institutional_id text not null,
+  full_name text not null,
+  email text not null,
+  status text not null default 'sent' check (status in ('sent', 'activated', 'rejected')),
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
+-- Enable RLS on access_requests
+alter table public.access_requests enable row level security;
+
+create policy "Access requests are viewable by everyone"
+  on public.access_requests for select
+  using (true);
+
+create policy "Access requests can be inserted by anyone"
+  on public.access_requests for insert
+  with check (true);
+
+-- ------------------------------------------------------------------------------
+-- 5. Documents Table
 -- ------------------------------------------------------------------------------
 create table if not exists public.documents (
   id uuid primary key default uuid_generate_v4(),
@@ -76,7 +166,6 @@ create table if not exists public.documents (
 -- Enable RLS on documents
 alter table public.documents enable row level security;
 
--- Documents Policies
 create policy "Documents are viewable by everyone"
   on public.documents for select
   using (true);
@@ -94,8 +183,28 @@ create policy "Users can delete documents"
   using (auth.uid() = user_id or auth.uid() is not null);
 
 -- ------------------------------------------------------------------------------
--- 3. Initial Seed Data
+-- 6. Initial Seed Data (Teachers, Students, Documents)
 -- ------------------------------------------------------------------------------
+
+-- Seed Teachers Roster
+insert into public.teachers (teacher_id, full_name, email, institution, department, designation, status)
+values
+  ('TCH-1001', 'Dr. Robert Vance', 'robert.vance@school.edu', 'inst-1', 'Physics', 'HOD Physics', 'unregistered'),
+  ('TCH-1002', 'Prof. Sarah Jenkins', 'sarah.jenkins@school.edu', 'inst-1', 'Mathematics', 'Senior Lecturer', 'unregistered'),
+  ('TCH-1003', 'Dr. Marcus Reynolds', 'marcus.reynolds@school.edu', 'inst-1', 'Chemistry', 'Lab Director', 'unregistered'),
+  ('TCH-2001', 'Elena Rostova', 'elena.rostova@cambridge.edu', 'inst-2', 'Computer Science', 'Lead Faculty', 'unregistered')
+on conflict (teacher_id) do nothing;
+
+-- Seed Students Roster
+insert into public.students (student_id, full_name, email, institution, grade, section, status)
+values
+  ('STU-2026-001', 'Alice Chen', 'alice.chen@student.edu', 'inst-1', 'grade-10', 'Section A', 'unregistered'),
+  ('STU-2026-002', 'Liam Miller', 'liam.miller@student.edu', 'inst-1', 'grade-10', 'Section A', 'unregistered'),
+  ('STU-2026-042', 'Sophia Rodriguez', 'sophia.rodriguez@student.edu', 'inst-1', 'grade-11', 'Science', 'unregistered'),
+  ('STU-2026-099', 'David Kim', 'david.kim@student.edu', 'inst-1', 'grade-12', 'Commerce', 'unregistered')
+on conflict (student_id) do nothing;
+
+-- Seed Documents
 insert into public.documents (title, institution, academic_year, class_grade, subject, timeline, file_type, file_size, created_at)
 values
   ('Mid-Term Physics Study Guide', 'inst-1', '2026-2027', 'grade-10', 'physics', 'term-1', 'pdf', '2.4 MB', now() - interval '9 days'),
