@@ -8,14 +8,13 @@ import {
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, Sparkles, X, Check,
   Share2, FolderInput, Copy, Pencil, ExternalLink,
-  Crown, GraduationCap, UserCheck, KeyRound, Send
+  Crown, GraduationCap, UserCheck, KeyRound, AlertCircle
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { 
   verifyInstitutionalId, 
-  processAccessRequest, 
+  registerWithInstitutionalId, 
   authenticateUser, 
-  updatePassword, 
   ADMIN_CREDENTIALS 
 } from './lib/authService';
 
@@ -353,30 +352,24 @@ function App() {
   const [currentUserRole, setCurrentUserRole] = useState(null); // 'admin' | 'teacher' | 'student'
   const [currentUserName, setCurrentUserName] = useState("");
   
-  // Auth view mode tabs: 'user_login' | 'admin_login' | 'request_access'
+  // Auth view mode tabs: 'user_login' | 'admin_login' | 'register'
   const [authTab, setAuthTab] = useState("user_login");
   
-  // Form states (Login)
-  const [emailInput, setEmailInput] = useState("");
-  const [passwordInput, setPasswordInput] = useState("");
+  // Form states (Login by ID or Email)
+  const [loginIdentifier, setLoginIdentifier] = useState("");
+  const [loginPassword, setLoginPassword] = useState("");
 
-  // Form states (Request Access / Registration by ID)
-  const [reqRole, setReqRole] = useState("teacher"); // 'teacher' | 'student'
-  const [reqId, setReqId] = useState("");
-  const [reqInstitution, setReqInstitution] = useState("inst-1");
-  const [verifiedInfo, setVerifiedInfo] = useState(null);
+  // Form states (Direct ID Registration & Password Setup)
+  const [regRole, setRegRole] = useState("teacher"); // 'teacher' | 'student'
+  const [regId, setRegId] = useState("");
+  const [regInstitution, setRegInstitution] = useState("inst-1");
+  const [regVerifiedInfo, setRegVerifiedInfo] = useState(null);
+  const [regPassword, setRegPassword] = useState("");
+  const [regConfirmPassword, setRegConfirmPassword] = useState("");
   const [verificationError, setVerificationError] = useState(null);
+  const [accountExistsAlert, setAccountExistsAlert] = useState(null);
   const [isVerifying, setIsVerifying] = useState(false);
-  const [isSubmittingAccess, setIsSubmittingAccess] = useState(false);
-
-  // First-Time Password Reset Modal
-  const [showPasswordChangeModal, setShowPasswordChangeModal] = useState(false);
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [isUpdatingPassword, setIsUpdatingPassword] = useState(false);
-
-  // Secure Access Dispatched Screen State (No credentials displayed on screen)
-  const [accessDispatched, setAccessDispatched] = useState(null);
+  const [isRegistering, setIsRegistering] = useState(false);
 
   // Toast System
   const [toast, setToast] = useState({ show: false, message: "", icon: "info" });
@@ -736,20 +729,27 @@ function App() {
 
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
-    if (!emailInput || !passwordInput) {
-      showToast("Please fill in all required fields", "info");
+    if (!loginIdentifier || !loginPassword) {
+      showToast("Please enter your ID/Email and password", "info");
       return;
     }
 
     const loginType = authTab === "admin_login" ? "admin" : "user";
     const res = await authenticateUser({
-      email: emailInput,
-      password: passwordInput,
+      identifier: loginIdentifier,
+      password: loginPassword,
       loginType: loginType
     });
 
     if (!res.success) {
       showToast(res.error || "Authentication failed", "info");
+      if (res.isUnregistered) {
+        setAuthTab("register");
+        setRegRole(res.error.includes("Teacher") ? "teacher" : "student");
+        setRegId(loginIdentifier);
+        setRegVerifiedInfo(null);
+        setAccountExistsAlert(null);
+      }
       return;
     }
 
@@ -758,98 +758,92 @@ function App() {
     setCurrentUserRole(user.role);
     setCurrentUserName(user.full_name || user.email.split('@')[0]);
 
-    if (user.must_change_password) {
-      setShowPasswordChangeModal(true);
-      showToast(`Welcome, ${user.full_name || user.email}! Please set your new password.`, "check-circle");
-    } else {
-      showToast(`Welcome back, ${user.full_name || user.email}!`, "check-circle");
-      setCurrentView("workspace");
-    }
-
-    setEmailInput("");
-    setPasswordInput("");
+    showToast(`Welcome back, ${user.full_name || user.email}!`, "check-circle");
+    setCurrentView("workspace");
+    setLoginIdentifier("");
+    setLoginPassword("");
   };
 
-  const handleVerifyId = async () => {
-    if (!reqId.trim()) {
+  const handleVerifyRegisterId = async () => {
+    if (!regId.trim()) {
       setVerificationError("Please enter your Identification Number (e.g. TCH-1001 or STU-2026-001)");
-      setVerifiedInfo(null);
+      setRegVerifiedInfo(null);
+      setAccountExistsAlert(null);
       return;
     }
 
     setIsVerifying(true);
     setVerificationError(null);
-    setVerifiedInfo(null);
+    setRegVerifiedInfo(null);
+    setAccountExistsAlert(null);
 
-    const res = await verifyInstitutionalId(reqRole, reqId);
+    const res = await verifyInstitutionalId(regRole, regId);
     setIsVerifying(false);
 
     if (res.success) {
-      setVerifiedInfo(res.record);
-      showToast(`Verified: ${res.record.full_name}`, "check-circle");
+      if (res.isRegistered) {
+        setAccountExistsAlert({
+          id: res.record.teacher_id || res.record.student_id,
+          name: res.record.full_name,
+          email: res.record.email,
+          role: regRole
+        });
+        showToast(`Account already exists for ${res.record.full_name}! Please log in.`, "info");
+      } else {
+        setRegVerifiedInfo(res.record);
+        showToast(`Verified: ${res.record.full_name}. Please create your password.`, "check-circle");
+      }
     } else {
       setVerificationError(res.error);
     }
   };
 
-  const handleRequestAccessSubmit = async (e) => {
+  const handleRegisterSubmit = async (e) => {
     e.preventDefault();
-    if (!reqId.trim()) {
-      showToast("Please enter your Identification Number", "info");
-      return;
-    }
-
-    setIsSubmittingAccess(true);
-    const res = await processAccessRequest({
-      role: reqRole,
-      institutionalId: reqId
-    });
-    setIsSubmittingAccess(false);
-
-    if (!res.success) {
-      showToast(res.error || "Request failed", "info");
-      return;
-    }
-
-    showToast(`Credentials dispatched to ${res.maskedEmail || res.email}!`, "check-circle");
-    
-    // Transition to secure access dispatched screen (Credentials NEVER shown on screen)
-    setAccessDispatched({
-      email: res.maskedEmail || res.email,
-      rawEmail: res.email,
-      fullName: res.fullName
-    });
-
-    setReqId("");
-    setVerifiedInfo(null);
-    setVerificationError(null);
-  };
-
-  const handlePasswordChangeSubmit = async (e) => {
-    e.preventDefault();
-    if (!newPassword || newPassword.length < 6) {
+    if (!regPassword || regPassword.length < 6) {
       showToast("Password must be at least 6 characters long", "info");
       return;
     }
-    if (newPassword !== confirmPassword) {
+    if (regPassword !== regConfirmPassword) {
       showToast("Passwords do not match", "info");
       return;
     }
 
-    setIsUpdatingPassword(true);
-    const res = await updatePassword(newPassword);
-    setIsUpdatingPassword(false);
+    setIsRegistering(true);
+    const res = await registerWithInstitutionalId({
+      role: regRole,
+      institutionalId: regId,
+      password: regPassword
+    });
+    setIsRegistering(false);
 
     if (!res.success) {
-      showToast(res.error || "Failed to update password", "info");
+      showToast(res.error || "Registration failed", "info");
+      if (res.isRegistered) {
+        setAccountExistsAlert({
+          id: res.record?.teacher_id || res.record?.student_id || regId,
+          name: res.record?.full_name || "",
+          email: res.record?.email || "",
+          role: regRole
+        });
+      }
       return;
     }
 
-    setShowPasswordChangeModal(false);
-    setNewPassword("");
-    setConfirmPassword("");
-    showToast("Password updated successfully! Welcome to EduVault.", "check-circle");
+    const user = res.user;
+    setCurrentUser(user.email);
+    setCurrentUserRole(user.role);
+    setCurrentUserName(user.full_name);
+    showToast(`🎉 Registration complete! Welcome to EduVault, ${user.full_name}!`, "check-circle");
     setCurrentView("workspace");
+
+    // Reset registration form
+    setRegId("");
+    setRegPassword("");
+    setRegConfirmPassword("");
+    setRegVerifiedInfo(null);
+    setAccountExistsAlert(null);
+    setVerificationError(null);
   };
 
   const handleLogout = async () => {
@@ -1067,8 +1061,8 @@ function App() {
                       className="btn btn-secondary" 
                       onClick={() => { 
                         setAuthTab("admin_login"); 
-                        setEmailInput(ADMIN_CREDENTIALS.email); 
-                        setPasswordInput("admin123"); 
+                        setLoginIdentifier("principal@school.edu"); 
+                        setLoginPassword("admin123"); 
                         setCurrentView("login"); 
                       }}
                       title="Principal / Administrator Login"
@@ -1080,8 +1074,8 @@ function App() {
                       className="btn btn-secondary" 
                       onClick={() => { 
                         setAuthTab("user_login"); 
-                        setEmailInput("robert.vance@school.edu"); 
-                        setPasswordInput("password123"); 
+                        setLoginIdentifier("TCH-1002"); 
+                        setLoginPassword("password123"); 
                         setCurrentView("login"); 
                       }}
                     >
@@ -1091,14 +1085,16 @@ function App() {
                     <button 
                       className="btn btn-primary" 
                       onClick={() => { 
-                        setAuthTab("request_access"); 
-                        setReqRole("teacher"); 
-                        setReqId("TCH-1001"); 
+                        setAuthTab("register"); 
+                        setRegRole("teacher"); 
+                        setRegId("TCH-1001"); 
+                        setRegVerifiedInfo(null);
+                        setAccountExistsAlert(null);
                         setCurrentView("signup"); 
                       }}
                     >
                       <UserPlus size={16} />
-                      <span>Request Access</span>
+                      <span>Register</span>
                     </button>
                   </>
                 ) : (
@@ -2069,8 +2065,8 @@ function App() {
                   className={`auth-tab-btn ${authTab === 'user_login' ? 'active' : ''}`}
                   onClick={() => { 
                     setAuthTab('user_login'); 
-                    setEmailInput("robert.vance@school.edu"); 
-                    setPasswordInput("password123"); 
+                    setLoginIdentifier("TCH-1002"); 
+                    setLoginPassword("password123"); 
                   }}
                 >
                   <LogIn size={15} />
@@ -2081,8 +2077,8 @@ function App() {
                   className={`auth-tab-btn ${authTab === 'admin_login' ? 'admin-active' : ''}`}
                   onClick={() => { 
                     setAuthTab('admin_login'); 
-                    setEmailInput(ADMIN_CREDENTIALS.email); 
-                    setPasswordInput("admin123"); 
+                    setLoginIdentifier(ADMIN_CREDENTIALS.email); 
+                    setLoginPassword("admin123"); 
                   }}
                 >
                   <Crown size={15} />
@@ -2090,57 +2086,59 @@ function App() {
                 </button>
                 <button 
                   type="button"
-                  className={`auth-tab-btn ${authTab === 'request_access' ? 'active' : ''}`}
+                  className={`auth-tab-btn ${authTab === 'register' ? 'active' : ''}`}
                   onClick={() => { 
-                    setAuthTab('request_access'); 
-                    setReqRole("teacher"); 
-                    setReqId("TCH-1001"); 
+                    setAuthTab('register'); 
+                    setRegRole("teacher"); 
+                    setRegId("TCH-1001"); 
+                    setRegVerifiedInfo(null);
+                    setAccountExistsAlert(null);
                   }}
                 >
-                  <UserCheck size={15} />
-                  <span>Request Access</span>
+                  <UserPlus size={15} />
+                  <span>Register</span>
                 </button>
               </div>
 
-              {/* Tab 1: Standard User Login (Teacher / Student) */}
+              {/* Tab 1: Standard User Login (Teacher / Student by ID or Email) */}
               {authTab === "user_login" && (
                 <>
                   <div className="auth-card-header">
                     <h2>Welcome to EduVault</h2>
-                    <p>Access your secure academic vault workspace</p>
+                    <p>Enter your Teacher ID, Student ID, or Email to sign in</p>
                   </div>
 
                   <form onSubmit={handleAuthSubmit} className="auth-form">
                     <div className="form-group">
-                      <label htmlFor="email">Email Address</label>
+                      <label htmlFor="login-id">Identification Number or Email</label>
                       <div className="input-wrapper">
-                        <Mail size={16} />
+                        <UserCheck size={16} />
                         <input 
-                          type="email" 
-                          id="email" 
-                          placeholder="you@school.edu" 
-                          value={emailInput} 
-                          onChange={(e) => setEmailInput(e.target.value)} 
+                          type="text" 
+                          id="login-id" 
+                          placeholder="e.g. TCH-1002 or you@school.edu" 
+                          value={loginIdentifier} 
+                          onChange={(e) => setLoginIdentifier(e.target.value)} 
                           required
                         />
                       </div>
                       <div className="quick-id-hints">
-                        <span>Quick Demo:</span>
-                        <span className="id-chip" onClick={() => { setEmailInput("robert.vance@school.edu"); setPasswordInput("password123"); }}>Teacher (Robert)</span>
-                        <span className="id-chip" onClick={() => { setEmailInput("alice.chen@student.edu"); setPasswordInput("password123"); }}>Student (Alice)</span>
+                        <span>Quick Demo IDs:</span>
+                        <span className="id-chip" onClick={() => { setLoginIdentifier("TCH-1002"); setLoginPassword("password123"); }}>Teacher (TCH-1002)</span>
+                        <span className="id-chip" onClick={() => { setLoginIdentifier("STU-2026-002"); setLoginPassword("password123"); }}>Student (STU-2026-002)</span>
                       </div>
                     </div>
 
                     <div className="form-group">
-                      <label htmlFor="password">Password</label>
+                      <label htmlFor="login-password">Password</label>
                       <div className="input-wrapper">
                         <Lock size={16} />
                         <input 
                           type="password" 
-                          id="password" 
+                          id="login-password" 
                           placeholder="••••••••" 
-                          value={passwordInput} 
-                          onChange={(e) => setPasswordInput(e.target.value)} 
+                          value={loginPassword} 
+                          onChange={(e) => setLoginPassword(e.target.value)} 
                           required
                         />
                       </div>
@@ -2154,8 +2152,14 @@ function App() {
                   <div className="auth-card-footer">
                     <p>
                       First time here?{' '}
-                      <span onClick={() => { setAuthTab("request_access"); setReqRole("teacher"); setReqId("TCH-1001"); }}>
-                        Request Access with Institutional ID
+                      <span onClick={() => { 
+                        setAuthTab("register"); 
+                        setRegRole("teacher"); 
+                        setRegId("TCH-1001"); 
+                        setRegVerifiedInfo(null);
+                        setAccountExistsAlert(null);
+                      }}>
+                        Register with your Institutional ID
                       </span>
                     </p>
                   </div>
@@ -2172,15 +2176,15 @@ function App() {
 
                   <form onSubmit={handleAuthSubmit} className="auth-form">
                     <div className="form-group">
-                      <label htmlFor="admin-email">Administrator Email</label>
+                      <label htmlFor="admin-id">Administrator ID or Email</label>
                       <div className="input-wrapper">
                         <Crown size={16} color="#facc15" />
                         <input 
-                          type="email" 
-                          id="admin-email" 
-                          placeholder="principal@school.edu" 
-                          value={emailInput} 
-                          onChange={(e) => setEmailInput(e.target.value)} 
+                          type="text" 
+                          id="admin-id" 
+                          placeholder="ADMIN-001 or principal@school.edu" 
+                          value={loginIdentifier} 
+                          onChange={(e) => setLoginIdentifier(e.target.value)} 
                           required
                         />
                       </div>
@@ -2194,8 +2198,8 @@ function App() {
                           type="password" 
                           id="admin-password" 
                           placeholder="••••••••" 
-                          value={passwordInput} 
-                          onChange={(e) => setPasswordInput(e.target.value)} 
+                          value={loginPassword} 
+                          onChange={(e) => setLoginPassword(e.target.value)} 
                           required
                         />
                       </div>
@@ -2209,7 +2213,7 @@ function App() {
                   <div className="auth-card-footer">
                     <p>
                       Faculty or Student?{' '}
-                      <span onClick={() => { setAuthTab("user_login"); setEmailInput("robert.vance@school.edu"); }}>
+                      <span onClick={() => { setAuthTab("user_login"); setLoginIdentifier("TCH-1002"); }}>
                         Standard User Login
                       </span>
                     </p>
@@ -2217,186 +2221,238 @@ function App() {
                 </>
               )}
 
-              {/* Tab 3: First-Time User Registration / Request Access */}
-              {authTab === "request_access" && (
+              {/* Tab 3: Direct Registration & On-the-Spot Password Setup */}
+              {authTab === "register" && (
                 <>
-                  {accessDispatched ? (
-                    <div className="access-dispatched-screen">
-                      <div className="success-icon-circle">
-                        <CheckCircle size={36} color="#10b981" />
+                  <div className="auth-card-header">
+                    <h2>Register Account</h2>
+                    <p>Enter your institutional ID to verify your record and create your password</p>
+                  </div>
+
+                  {/* Case A: Account Already Exists Alert */}
+                  {accountExistsAlert ? (
+                    <div className="account-exists-card">
+                      <div className="warning-badge-icon">
+                        <AlertCircle size={28} />
                       </div>
-                      <h3>Credentials Dispatched!</h3>
-                      <p className="dispatched-main-msg">
-                        We have verified your identity and sent your login username and temporary password to your official school email:
+                      <h4>Account Already Exists!</h4>
+                      <p>
+                        An active account is already registered for <strong>{accountExistsAlert.name}</strong> ({accountExistsAlert.id}).
                       </p>
-
-                      <div className="dispatched-email-badge">
-                        <Mail size={16} />
-                        <span>{accessDispatched.email}</span>
-                      </div>
-
-                      <div className="security-notice-box">
-                        <Shield size={16} color="#60a5fa" />
-                        <div>
-                          <strong>Two-Layer Security Protection:</strong> For your security, your password is never exposed on this screen. Please open your email inbox to retrieve your credentials.
-                        </div>
-                      </div>
-
-                      <button 
-                        type="button" 
-                        className="btn btn-primary btn-block"
-                        onClick={() => { 
-                          setAuthTab("user_login"); 
-                          setEmailInput(accessDispatched.rawEmail); 
-                          setPasswordInput(""); 
-                          setAccessDispatched(null); 
-                        }}
-                      >
-                        <LogIn size={16} />
-                        <span>Proceed to Log In</span>
-                      </button>
-
-                      <div className="dispatched-resend-prompt">
-                        Didn&apos;t receive the email?{' '}
-                        <span onClick={() => setAccessDispatched(null)}>
-                          Try again with another ID
-                        </span>
+                      <div className="account-exists-actions">
+                        <button 
+                          type="button" 
+                          className="btn btn-primary btn-block"
+                          onClick={() => {
+                            setAuthTab("user_login");
+                            setLoginIdentifier(accountExistsAlert.id);
+                            setLoginPassword("");
+                            setAccountExistsAlert(null);
+                            setRegVerifiedInfo(null);
+                          }}
+                        >
+                          <LogIn size={16} />
+                          <span>Proceed to Log In</span>
+                        </button>
+                        <button 
+                          type="button" 
+                          className="btn btn-secondary btn-block"
+                          onClick={() => {
+                            setAccountExistsAlert(null);
+                            setRegVerifiedInfo(null);
+                            setRegId("");
+                          }}
+                        >
+                          Verify a Different ID
+                        </button>
                       </div>
                     </div>
                   ) : (
-                    <>
-                      <div className="auth-card-header">
-                        <h2>Request Access</h2>
-                        <p>Enter your institutional ID to verify against the school directory and receive your credentials</p>
+                    /* Normal Registration Form */
+                    <form onSubmit={regVerifiedInfo ? handleRegisterSubmit : (e) => { e.preventDefault(); handleVerifyRegisterId(); }} className="auth-form">
+                      {/* Role Selection */}
+                      <div className="form-group">
+                        <label>I am a:</label>
+                        <div className="auth-role-grid">
+                          <div 
+                            className={`role-select-card ${regRole === 'teacher' ? 'selected' : ''}`}
+                            onClick={() => { 
+                              setRegRole('teacher'); 
+                              setRegId('TCH-1001'); 
+                              setRegVerifiedInfo(null); 
+                              setVerificationError(null); 
+                              setAccountExistsAlert(null);
+                            }}
+                          >
+                            <GraduationCap size={20} />
+                            <span>Teacher / Faculty</span>
+                          </div>
+                          <div 
+                            className={`role-select-card ${regRole === 'student' ? 'selected' : ''}`}
+                            onClick={() => { 
+                              setRegRole('student'); 
+                              setRegId('STU-2026-001'); 
+                              setRegVerifiedInfo(null); 
+                              setVerificationError(null); 
+                              setAccountExistsAlert(null);
+                            }}
+                          >
+                            <Users size={20} />
+                            <span>Student</span>
+                          </div>
+                        </div>
                       </div>
 
-                      <form onSubmit={handleRequestAccessSubmit} className="auth-form">
-                        {/* Role Selection */}
-                        <div className="form-group">
-                          <label>I am a:</label>
-                          <div className="auth-role-grid">
-                            <div 
-                              className={`role-select-card ${reqRole === 'teacher' ? 'selected' : ''}`}
-                              onClick={() => { setReqRole('teacher'); setReqId('TCH-1001'); setVerifiedInfo(null); setVerificationError(null); }}
-                            >
-                              <GraduationCap size={20} />
-                              <span>Teacher / Faculty</span>
-                            </div>
-                            <div 
-                              className={`role-select-card ${reqRole === 'student' ? 'selected' : ''}`}
-                              onClick={() => { setReqRole('student'); setReqId('STU-2026-001'); setVerifiedInfo(null); setVerificationError(null); }}
-                            >
-                              <Users size={20} />
-                              <span>Student</span>
-                            </div>
-                          </div>
+                      {/* Institution */}
+                      <div className="form-group">
+                        <label htmlFor="reg-institution">Institution</label>
+                        <div className="input-wrapper">
+                          <School size={16} />
+                          <select 
+                            id="reg-institution"
+                            value={regInstitution}
+                            onChange={(e) => setRegInstitution(e.target.value)}
+                          >
+                            <option value="inst-1">St. Xavier High School</option>
+                            <option value="inst-2">Cambridge Global Academy</option>
+                          </select>
                         </div>
+                      </div>
 
-                        {/* Institution */}
-                        <div className="form-group">
-                          <label htmlFor="req-institution">Institution</label>
-                          <div className="input-wrapper">
-                            <School size={16} />
-                            <select 
-                              id="req-institution"
-                              value={reqInstitution}
-                              onChange={(e) => setReqInstitution(e.target.value)}
-                            >
-                              <option value="inst-1">St. Xavier High School</option>
-                              <option value="inst-2">Cambridge Global Academy</option>
-                            </select>
-                          </div>
+                      {/* ID Input */}
+                      <div className="form-group">
+                        <label htmlFor="reg-id">
+                          {regRole === 'teacher' ? 'Teacher ID Number' : 'Student Roll / ID Number'}
+                        </label>
+                        <div className="input-wrapper">
+                          <UserCheck size={16} />
+                          <input 
+                            type="text" 
+                            id="reg-id" 
+                            placeholder={regRole === 'teacher' ? "e.g. TCH-1001" : "e.g. STU-2026-001"}
+                            value={regId} 
+                            onChange={(e) => { 
+                              setRegId(e.target.value); 
+                              setRegVerifiedInfo(null); 
+                              setVerificationError(null); 
+                              setAccountExistsAlert(null);
+                            }} 
+                            disabled={Boolean(regVerifiedInfo)}
+                            required
+                          />
                         </div>
-
-                        {/* ID Input */}
-                        <div className="form-group">
-                          <label htmlFor="req-id">
-                            {reqRole === 'teacher' ? 'Teacher ID Number' : 'Student Roll / ID Number'}
-                          </label>
-                          <div className="input-wrapper">
-                            <UserCheck size={16} />
-                            <input 
-                              type="text" 
-                              id="req-id" 
-                              placeholder={reqRole === 'teacher' ? "e.g. TCH-1001" : "e.g. STU-2026-001"}
-                              value={reqId} 
-                              onChange={(e) => { setReqId(e.target.value); setVerifiedInfo(null); setVerificationError(null); }} 
-                              required
-                            />
-                          </div>
+                        {!regVerifiedInfo && (
                           <div className="quick-id-hints">
                             <span>Sample IDs:</span>
-                            {reqRole === 'teacher' ? (
+                            {regRole === 'teacher' ? (
                               <>
-                                <span className="id-chip" onClick={() => { setReqId('TCH-1001'); setVerifiedInfo(null); }}>TCH-1001 (Physics)</span>
-                                <span className="id-chip" onClick={() => { setReqId('TCH-1002'); setVerifiedInfo(null); }}>TCH-1002 (Math)</span>
+                                <span className="id-chip" onClick={() => { setRegId('TCH-1001'); setRegVerifiedInfo(null); setAccountExistsAlert(null); }}>TCH-1001 (Unregistered)</span>
+                                <span className="id-chip" onClick={() => { setRegId('TCH-1002'); setRegVerifiedInfo(null); setAccountExistsAlert(null); }}>TCH-1002 (Already Registered)</span>
                               </>
                             ) : (
                               <>
-                                <span className="id-chip" onClick={() => { setReqId('STU-2026-001'); setVerifiedInfo(null); }}>STU-2026-001 (Grade 10)</span>
-                                <span className="id-chip" onClick={() => { setReqId('STU-2026-042'); setVerifiedInfo(null); }}>STU-2026-042 (Grade 11)</span>
+                                <span className="id-chip" onClick={() => { setRegId('STU-2026-001'); setRegVerifiedInfo(null); setAccountExistsAlert(null); }}>STU-2026-001 (Unregistered)</span>
+                                <span className="id-chip" onClick={() => { setRegId('STU-2026-002'); setRegVerifiedInfo(null); setAccountExistsAlert(null); }}>STU-2026-002 (Already Registered)</span>
                               </>
                             )}
                           </div>
-                        </div>
+                        )}
+                      </div>
 
-                        {/* Verification Result Banner */}
-                        {verifiedInfo && (
-                          <div className="verification-status-banner">
-                            <CheckCircle size={20} />
-                            <div className="verification-details">
-                              <div className="verification-name">{verifiedInfo.full_name}</div>
-                              <div className="verification-meta">
-                                {reqRole === 'teacher' 
-                                  ? `${verifiedInfo.department} • ${verifiedInfo.designation}`
-                                  : `${verifiedInfo.grade.toUpperCase()} • ${verifiedInfo.section}`}
-                              </div>
-                              <div className="verification-meta">
-                                Registered Email: <strong>{verifiedInfo.email}</strong>
-                              </div>
+                      {/* Verification Result Banner */}
+                      {regVerifiedInfo && (
+                        <div className="verification-status-banner">
+                          <CheckCircle size={20} />
+                          <div className="verification-details">
+                            <div className="verification-name">{regVerifiedInfo.full_name}</div>
+                            <div className="verification-meta">
+                              {regRole === 'teacher' 
+                                ? `${regVerifiedInfo.department} • ${regVerifiedInfo.designation}`
+                                : `${regVerifiedInfo.grade.toUpperCase()} • ${regVerifiedInfo.section}`}
+                            </div>
+                            <div className="verification-meta">
+                              Email: <strong>{regVerifiedInfo.email}</strong>
                             </div>
                           </div>
-                        )}
+                        </div>
+                      )}
 
-                        {verificationError && (
-                          <div className="verification-status-banner error">
-                            <Info size={18} />
-                            <div>{verificationError}</div>
+                      {/* Verification Error */}
+                      {verificationError && (
+                        <div className="verification-status-banner error">
+                          <Info size={18} />
+                          <div>{verificationError}</div>
+                        </div>
+                      )}
+
+                      {/* When Verified: Reveal Password Creation Fields */}
+                      {regVerifiedInfo ? (
+                        <>
+                          <div className="form-group">
+                            <label htmlFor="reg-password">Create New Password (min 6 chars)</label>
+                            <div className="input-wrapper">
+                              <Lock size={16} />
+                              <input 
+                                type="password" 
+                                id="reg-password" 
+                                placeholder="Create a secure password" 
+                                value={regPassword} 
+                                onChange={(e) => setRegPassword(e.target.value)} 
+                                required
+                              />
+                            </div>
                           </div>
-                        )}
 
-                        {/* Verification / Submission Action Buttons */}
-                        {!verifiedInfo ? (
-                          <button 
-                            type="button" 
-                            className="btn btn-secondary btn-block"
-                            onClick={handleVerifyId}
-                            disabled={isVerifying}
-                          >
-                            {isVerifying ? "Verifying with Database..." : "Verify Identification Number"}
-                          </button>
-                        ) : (
+                          <div className="form-group">
+                            <label htmlFor="reg-confirm-password">Confirm Password</label>
+                            <div className="input-wrapper">
+                              <Lock size={16} />
+                              <input 
+                                type="password" 
+                                id="reg-confirm-password" 
+                                placeholder="Confirm your password" 
+                                value={regConfirmPassword} 
+                                onChange={(e) => setRegConfirmPassword(e.target.value)} 
+                                required
+                              />
+                            </div>
+                          </div>
+
                           <button 
                             type="submit" 
                             className="btn btn-primary btn-block"
-                            disabled={isSubmittingAccess}
+                            disabled={isRegistering}
                           >
-                            <Send size={16} />
-                            <span>{isSubmittingAccess ? "Dispatching..." : "Confirm & Send Login Credentials to Email"}</span>
+                            <KeyRound size={16} />
+                            <span>{isRegistering ? "Creating Account..." : "Complete Registration & Enter Workspace"}</span>
                           </button>
-                        )}
-                      </form>
-
-                      <div className="auth-card-footer">
-                        <p>
-                          Already have credentials?{' '}
-                          <span onClick={() => { setAuthTab("user_login"); setEmailInput("robert.vance@school.edu"); }}>
-                            Log in here
-                          </span>
-                        </p>
-                      </div>
-                    </>
+                        </>
+                      ) : (
+                        <button 
+                          type="button" 
+                          className="btn btn-secondary btn-block"
+                          onClick={handleVerifyRegisterId}
+                          disabled={isVerifying}
+                        >
+                          {isVerifying ? "Verifying with Database..." : "Verify Identification Number"}
+                        </button>
+                      )}
+                    </form>
                   )}
+
+                  <div className="auth-card-footer">
+                    <p>
+                      Already have an account?{' '}
+                      <span onClick={() => { 
+                        setAuthTab("user_login"); 
+                        setLoginIdentifier(regId || "TCH-1002"); 
+                        setAccountExistsAlert(null);
+                        setRegVerifiedInfo(null);
+                      }}>
+                        Log in here
+                      </span>
+                    </p>
+                  </div>
                 </>
               )}
             </div>
@@ -2668,52 +2724,7 @@ function App() {
         </Modal>
       )}
 
-      {/* First-Time Password Reset Modal */}
-      {showPasswordChangeModal && (
-        <Modal title="Set Permanent Password" icon={KeyRound} onClose={() => {}}>
-          <form onSubmit={handlePasswordChangeSubmit}>
-            <div className="move-modal-body">
-              <p className="move-prompt-text" style={{ marginBottom: '1rem', color: '#93c5fd' }}>
-                🎉 Verification successful! For security, please choose a permanent password for your EduVault account.
-              </p>
-              
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label>New Permanent Password (min 6 characters)</label>
-                <div className="input-wrapper">
-                  <Lock size={16} />
-                  <input 
-                    type="password" 
-                    placeholder="Enter new password"
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
 
-              <div className="form-group" style={{ marginBottom: '1rem' }}>
-                <label>Confirm Password</label>
-                <div className="input-wrapper">
-                  <Lock size={16} />
-                  <input 
-                    type="password" 
-                    placeholder="Confirm new password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="modal-actions-footer">
-              <button type="submit" className="btn btn-primary btn-sm" disabled={isUpdatingPassword}>
-                {isUpdatingPassword ? "Saving..." : "Save Password & Enter Workspace"}
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
 
 
 

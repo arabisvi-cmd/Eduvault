@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- EduVault Database Schema & RLS Setup (Supabase PostgreSQL)
--- Multi-Role Authentication, Roster ID Verification & Document Storage
+-- Direct Institutional ID Registration & Password Setup
 -- (Idempotent: Safe to run and re-run multiple times)
 -- ==============================================================================
 
@@ -17,7 +17,6 @@ create table if not exists public.profiles (
   institution text default 'inst-1',
   role text default 'student' check (role in ('admin', 'teacher', 'student')),
   institutional_id text,
-  must_change_password boolean default false,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
@@ -25,12 +24,11 @@ create table if not exists public.profiles (
 -- Ensure columns exist if table was already created in earlier step
 alter table public.profiles add column if not exists role text default 'student';
 alter table public.profiles add column if not exists institutional_id text;
-alter table public.profiles add column if not exists must_change_password boolean default false;
 
 -- Enable RLS on profiles
 alter table public.profiles enable row level security;
 
--- Profiles Policies (Drop if exists first to avoid 42710 error)
+-- Profiles Policies
 drop policy if exists "Public profiles are viewable by everyone" on public.profiles;
 create policy "Public profiles are viewable by everyone"
   on public.profiles for select
@@ -50,14 +48,13 @@ create policy "Users can insert their own profile"
 create or replace function public.handle_new_user()
 returns trigger as $$
 begin
-  insert into public.profiles (id, email, full_name, role, institutional_id, must_change_password)
+  insert into public.profiles (id, email, full_name, role, institutional_id)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', split_part(new.email, '@', 1)),
     coalesce(new.raw_user_meta_data->>'role', 'student'),
-    new.raw_user_meta_data->>'institutional_id',
-    coalesce((new.raw_user_meta_data->>'must_change_password')::boolean, false)
+    new.raw_user_meta_data->>'institutional_id'
   )
   on conflict (id) do update
   set 
@@ -65,7 +62,6 @@ begin
     full_name = coalesce(excluded.full_name, public.profiles.full_name),
     role = coalesce(excluded.role, public.profiles.role),
     institutional_id = coalesce(excluded.institutional_id, public.profiles.institutional_id),
-    must_change_password = coalesce(excluded.must_change_password, public.profiles.must_change_password),
     updated_at = now();
   return new;
 end;
@@ -86,10 +82,14 @@ create table if not exists public.teachers (
   institution text not null default 'inst-1',
   department text not null default 'Science',
   designation text not null default 'Faculty',
+  password text, -- NULL until user creates password during registration
   status text not null default 'unregistered' check (status in ('unregistered', 'active', 'suspended')),
   registered_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Ensure password column exists if table was created in earlier run
+alter table public.teachers add column if not exists password text;
 
 -- Enable RLS on teachers table
 alter table public.teachers enable row level security;
@@ -114,10 +114,14 @@ create table if not exists public.students (
   institution text not null default 'inst-1',
   grade text not null default 'grade-10',
   section text not null default 'Section A',
+  password text, -- NULL until user creates password during registration
   status text not null default 'unregistered' check (status in ('unregistered', 'active', 'suspended')),
   registered_at timestamp with time zone,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
+
+-- Ensure password column exists if table was created in earlier run
+alter table public.students add column if not exists password text;
 
 -- Enable RLS on students table
 alter table public.students enable row level security;
@@ -133,33 +137,7 @@ create policy "Students roster can be updated upon registration"
   using (true);
 
 -- ------------------------------------------------------------------------------
--- 4. Access Requests Audit Log
--- ------------------------------------------------------------------------------
-create table if not exists public.access_requests (
-  id uuid primary key default uuid_generate_v4(),
-  role text not null check (role in ('teacher', 'student')),
-  institutional_id text not null,
-  full_name text not null,
-  email text not null,
-  status text not null default 'sent' check (status in ('sent', 'activated', 'rejected')),
-  created_at timestamp with time zone default timezone('utc'::text, now()) not null
-);
-
--- Enable RLS on access_requests
-alter table public.access_requests enable row level security;
-
-drop policy if exists "Access requests are viewable by everyone" on public.access_requests;
-create policy "Access requests are viewable by everyone"
-  on public.access_requests for select
-  using (true);
-
-drop policy if exists "Access requests can be inserted by anyone" on public.access_requests;
-create policy "Access requests can be inserted by anyone"
-  on public.access_requests for insert
-  with check (true);
-
--- ------------------------------------------------------------------------------
--- 5. Documents Table
+-- 4. Documents Table
 -- ------------------------------------------------------------------------------
 create table if not exists public.documents (
   id uuid primary key default uuid_generate_v4(),
@@ -202,16 +180,16 @@ create policy "Users can delete documents"
   using (auth.uid() = user_id or auth.uid() is not null);
 
 -- ------------------------------------------------------------------------------
--- 6. Initial Seed Data (Teachers, Students, Documents)
+-- 5. Initial Seed Data (Teachers, Students, Documents)
 -- ------------------------------------------------------------------------------
 
--- Seed Teachers Roster
-insert into public.teachers (teacher_id, full_name, email, institution, department, designation, status)
+-- Seed Teachers Roster (password is null initially for unregistered teachers)
+insert into public.teachers (teacher_id, full_name, email, institution, department, designation, password, status)
 values
-  ('TCH-1001', 'Dr. Robert Vance', 'robert.vance@school.edu', 'inst-1', 'Physics', 'HOD Physics', 'unregistered'),
-  ('TCH-1002', 'Prof. Sarah Jenkins', 'sarah.jenkins@school.edu', 'inst-1', 'Mathematics', 'Senior Lecturer', 'unregistered'),
-  ('TCH-1003', 'Dr. Marcus Reynolds', 'marcus.reynolds@school.edu', 'inst-1', 'Chemistry', 'Lab Director', 'unregistered'),
-  ('TCH-2001', 'Elena Rostova', 'elena.rostova@cambridge.edu', 'inst-2', 'Computer Science', 'Lead Faculty', 'unregistered')
+  ('TCH-1001', 'Dr. Robert Vance', 'robert.vance@school.edu', 'inst-1', 'Physics', 'HOD Physics', null, 'unregistered'),
+  ('TCH-1002', 'Prof. Sarah Jenkins', 'sarah.jenkins@school.edu', 'inst-1', 'Mathematics', 'Senior Lecturer', null, 'unregistered'),
+  ('TCH-1003', 'Dr. Marcus Reynolds', 'marcus.reynolds@school.edu', 'inst-1', 'Chemistry', 'Lab Director', null, 'unregistered'),
+  ('TCH-2001', 'Elena Rostova', 'elena.rostova@cambridge.edu', 'inst-2', 'Computer Science', 'Lead Faculty', null, 'unregistered')
 on conflict (teacher_id) do update
 set 
   full_name = excluded.full_name,
@@ -219,13 +197,13 @@ set
   department = excluded.department,
   designation = excluded.designation;
 
--- Seed Students Roster
-insert into public.students (student_id, full_name, email, institution, grade, section, status)
+-- Seed Students Roster (password is null initially for unregistered students)
+insert into public.students (student_id, full_name, email, institution, grade, section, password, status)
 values
-  ('STU-2026-001', 'Alice Chen', 'alice.chen@student.edu', 'inst-1', 'grade-10', 'Section A', 'unregistered'),
-  ('STU-2026-002', 'Liam Miller', 'liam.miller@student.edu', 'inst-1', 'grade-10', 'Section A', 'unregistered'),
-  ('STU-2026-042', 'Sophia Rodriguez', 'sophia.rodriguez@student.edu', 'inst-1', 'grade-11', 'Science', 'unregistered'),
-  ('STU-2026-099', 'David Kim', 'david.kim@student.edu', 'inst-1', 'grade-12', 'Commerce', 'unregistered')
+  ('STU-2026-001', 'Alice Chen', 'alice.chen@student.edu', 'inst-1', 'grade-10', 'Section A', null, 'unregistered'),
+  ('STU-2026-002', 'Liam Miller', 'liam.miller@student.edu', 'inst-1', 'grade-10', 'Section A', null, 'unregistered'),
+  ('STU-2026-042', 'Sophia Rodriguez', 'sophia.rodriguez@student.edu', 'inst-1', 'grade-11', 'Science', null, 'unregistered'),
+  ('STU-2026-099', 'David Kim', 'david.kim@student.edu', 'inst-1', 'grade-12', 'Commerce', null, 'unregistered')
 on conflict (student_id) do update
 set 
   full_name = excluded.full_name,

@@ -36,6 +36,9 @@ vi.mock('./lib/supabase', () => ({
         order: vi.fn().mockResolvedValue({ data: [], error: null }),
         ilike: vi.fn().mockReturnValue({
           maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null })
+        }),
+        or: vi.fn().mockReturnValue({
+          maybeSingle: vi.fn().mockResolvedValue({ data: null, error: null })
         })
       }),
       insert: vi.fn().mockReturnValue({
@@ -67,10 +70,10 @@ describe('EduVault App Rendering & Navigation tests', () => {
     
     // Login form title should be present
     expect(screen.getByRole('heading', { name: /Welcome to EduVault/i })).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('you@school.edu')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/e.g. TCH-1002 or you@school.edu/i)).toBeInTheDocument();
   });
 
-  it('should sign in as Teacher and display Teacher role badge', async () => {
+  it('should sign in using Teacher ID and display Teacher role badge', async () => {
     render(<App />);
     
     // Navigate to Login Page
@@ -78,10 +81,10 @@ describe('EduVault App Rendering & Navigation tests', () => {
     fireEvent.click(loginBtn);
     
     // Enter credentials
-    const emailInput = screen.getByPlaceholderText('you@school.edu');
+    const idInput = screen.getByPlaceholderText(/e.g. TCH-1002 or you@school.edu/i);
     const passwordInput = screen.getByPlaceholderText('••••••••');
     
-    fireEvent.change(emailInput, { target: { value: 'robert.vance@school.edu' } });
+    fireEvent.change(idInput, { target: { value: 'TCH-1002' } });
     fireEvent.change(passwordInput, { target: { value: 'password123' } });
     
     // Submit form
@@ -91,7 +94,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
     // Should display Teacher role badge and user full name
     await waitFor(() => {
       expect(screen.getByText('Teacher')).toBeInTheDocument();
-      expect(screen.getByText(/Dr. Robert Vance \(Logout\)/i)).toBeInTheDocument();
+      expect(screen.getByText(/Prof. Sarah Jenkins \(Logout\)/i)).toBeInTheDocument();
     });
   });
 
@@ -116,17 +119,17 @@ describe('EduVault App Rendering & Navigation tests', () => {
     });
   });
 
-  it('should verify teacher ID in Request Access and show matching roster details', async () => {
+  it('should verify unregistered teacher ID and allow creating password directly', async () => {
     render(<App />);
 
-    // Click Request Access in header
-    const reqAccessBtn = screen.getByRole('button', { name: /Request Access/i });
-    fireEvent.click(reqAccessBtn);
+    // Click Register in header
+    const regBtn = screen.getByRole('button', { name: /Register/i });
+    fireEvent.click(regBtn);
 
-    // Heading should indicate Request Access
-    expect(screen.getByRole('heading', { name: /Request Access/i })).toBeInTheDocument();
+    // Heading should indicate Register Account
+    expect(screen.getByRole('heading', { name: /Register Account/i })).toBeInTheDocument();
 
-    // Type Teacher ID
+    // Type unregistered Teacher ID
     const idInput = screen.getByPlaceholderText(/e.g. TCH-1001/i);
     fireEvent.change(idInput, { target: { value: 'TCH-1001' } });
 
@@ -138,31 +141,62 @@ describe('EduVault App Rendering & Navigation tests', () => {
     await waitFor(() => {
       expect(screen.getByText('Dr. Robert Vance')).toBeInTheDocument();
       expect(screen.getByText(/Physics • HOD Physics/i)).toBeInTheDocument();
-      expect(screen.getByText('robert.vance@school.edu')).toBeInTheDocument();
+      expect(screen.getByText(/robert.vance@school.edu/i)).toBeInTheDocument();
     });
 
-    // Confirm & Send credentials button appears
-    const sendBtn = screen.getByRole('button', { name: /Confirm & Send Login Credentials to Email/i });
-    expect(sendBtn).toBeInTheDocument();
-    fireEvent.click(sendBtn);
+    // Password creation inputs appear
+    const newPassInput = screen.getByPlaceholderText(/Create a secure password/i);
+    const confirmPassInput = screen.getByPlaceholderText(/Confirm your password/i);
+    fireEvent.change(newPassInput, { target: { value: 'mysecretpass' } });
+    fireEvent.change(confirmPassInput, { target: { value: 'mysecretpass' } });
 
-    // Verify secure confirmation screen appears with masked email and 2-layer security notice
+    // Click Complete Registration button
+    const completeBtn = screen.getByRole('button', { name: /Complete Registration & Enter Workspace/i });
+    fireEvent.click(completeBtn);
+
+    // User is logged in and in workspace
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: /Credentials Dispatched!/i })).toBeInTheDocument();
-      expect(screen.getByText(/Two-Layer Security Protection/i)).toBeInTheDocument();
+      expect(screen.getByText(/Dr. Robert Vance \(Logout\)/i)).toBeInTheDocument();
+    });
+  });
+
+  it('should show Account Already Exists alert when registering an ID that already has a password', async () => {
+    render(<App />);
+
+    // Click Register in header
+    const regBtn = screen.getByRole('button', { name: /Register/i });
+    fireEvent.click(regBtn);
+
+    // Type already registered Teacher ID (TCH-1002)
+    const idInput = screen.getByPlaceholderText(/e.g. TCH-1001/i);
+    fireEvent.change(idInput, { target: { value: 'TCH-1002' } });
+
+    // Click Verify button
+    const verifyBtn = screen.getByRole('button', { name: /Verify Identification Number/i });
+    fireEvent.click(verifyBtn);
+
+    // Verify Account Already Exists warning card
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: /Account Already Exists!/i })).toBeInTheDocument();
+      expect(screen.getByText(/An active account is already registered for/i)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: /Proceed to Log In/i })).toBeInTheDocument();
     });
 
-    // Verify credentials/password are NOT exposed on screen
-    expect(screen.queryByText(/EduVault-/i)).not.toBeInTheDocument();
+    // Click Proceed to Log In
+    const proceedBtn = screen.getByRole('button', { name: /Proceed to Log In/i });
+    fireEvent.click(proceedBtn);
+
+    // Should navigate to login with ID pre-filled
+    expect(screen.getByRole('heading', { name: /Welcome to EduVault/i })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('TCH-1002')).toBeInTheDocument();
   });
 
-  it('should show error when verifying invalid identification number', async () => {
+  it('should show error when verifying non-existent identification number', async () => {
     render(<App />);
 
-    // Click Request Access
-    const reqAccessBtn = screen.getByRole('button', { name: /Request Access/i });
-    fireEvent.click(reqAccessBtn);
+    // Click Register
+    const regBtn = screen.getByRole('button', { name: /Register/i });
+    fireEvent.click(regBtn);
 
     // Type invalid ID
     const idInput = screen.getByPlaceholderText(/e.g. TCH-1001/i);

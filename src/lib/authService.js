@@ -9,6 +9,7 @@ export const MOCK_TEACHERS = [
     institution: 'inst-1',
     department: 'Physics',
     designation: 'HOD Physics',
+    password: null, // Unregistered by default (ready for testing registration)
     status: 'unregistered'
   },
   {
@@ -18,7 +19,8 @@ export const MOCK_TEACHERS = [
     institution: 'inst-1',
     department: 'Mathematics',
     designation: 'Senior Lecturer',
-    status: 'unregistered'
+    password: 'password123', // Already registered demo account
+    status: 'active'
   },
   {
     teacher_id: 'TCH-1003',
@@ -27,6 +29,7 @@ export const MOCK_TEACHERS = [
     institution: 'inst-1',
     department: 'Chemistry',
     designation: 'Lab Director',
+    password: null,
     status: 'unregistered'
   },
   {
@@ -36,6 +39,7 @@ export const MOCK_TEACHERS = [
     institution: 'inst-2',
     department: 'Computer Science',
     designation: 'Lead Faculty',
+    password: null,
     status: 'unregistered'
   }
 ];
@@ -48,6 +52,7 @@ export const MOCK_STUDENTS = [
     institution: 'inst-1',
     grade: 'grade-10',
     section: 'Section A',
+    password: null, // Unregistered by default
     status: 'unregistered'
   },
   {
@@ -57,7 +62,8 @@ export const MOCK_STUDENTS = [
     institution: 'inst-1',
     grade: 'grade-10',
     section: 'Section A',
-    status: 'unregistered'
+    password: 'password123', // Already registered demo account
+    status: 'active'
   },
   {
     student_id: 'STU-2026-042',
@@ -66,6 +72,7 @@ export const MOCK_STUDENTS = [
     institution: 'inst-1',
     grade: 'grade-11',
     section: 'Science',
+    password: null,
     status: 'unregistered'
   },
   {
@@ -75,36 +82,28 @@ export const MOCK_STUDENTS = [
     institution: 'inst-1',
     grade: 'grade-12',
     section: 'Commerce',
+    password: null,
     status: 'unregistered'
   }
 ];
 
 export const ADMIN_CREDENTIALS = {
   email: 'principal@school.edu',
+  admin_id: 'ADMIN-001',
   role: 'admin',
   full_name: 'Principal Arthur Davies',
-  institution: 'inst-1'
+  institution: 'inst-1',
+  password: 'admin123'
 };
 
 /**
- * Generate a random temporary password for verification invite
- */
-function generateTempPassword() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  let code = '';
-  for (let i = 0; i < 6; i++) {
-    code += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return `EduVault-${code}`;
-}
-
-/**
- * Verifies an institutional ID against the database (or mock fallback)
+ * Verifies an institutional ID against the database (or mock fallback).
+ * Returns whether the ID exists and if a password is already set.
  */
 export async function verifyInstitutionalId(role, idInput) {
   const cleanId = (idInput || '').trim().toUpperCase();
   if (!cleanId) {
-    return { success: false, error: 'Please enter an identification number.' };
+    return { success: false, exists: false, isRegistered: false, error: 'Please enter an identification number.' };
   }
 
   const table = role === 'teacher' ? 'teachers' : 'students';
@@ -121,7 +120,13 @@ export async function verifyInstitutionalId(role, idInput) {
       if (error) {
         console.warn('Supabase lookup error:', error);
       } else if (data) {
-        return { success: true, record: data };
+        const isRegistered = Boolean(data.password && data.password.trim() !== '');
+        return {
+          success: true,
+          exists: true,
+          isRegistered: isRegistered,
+          record: data
+        };
       }
     } catch (err) {
       console.warn('Database lookup failed, falling back to local list', err);
@@ -133,254 +138,265 @@ export async function verifyInstitutionalId(role, idInput) {
   const match = list.find(item => item[idField].toUpperCase() === cleanId);
 
   if (match) {
-    return { success: true, record: match };
+    const isRegistered = Boolean(match.password && match.password.trim() !== '');
+    return {
+      success: true,
+      exists: true,
+      isRegistered: isRegistered,
+      record: match
+    };
   }
 
   return { 
     success: false, 
+    exists: false,
+    isRegistered: false,
     error: `No record found for ${role === 'teacher' ? 'Teacher ID' : 'Student ID'} "${cleanId}". Please check with your school administration.` 
   };
 }
 
 /**
- * Helper to securely mask an email address for UI display (e.g. r****e@school.edu)
+ * Register account with Institutional ID:
+ * 1. Checks if ID exists and password is empty.
+ * 2. If password already exists, returns error and prompts to log in.
+ * 3. If empty, saves password to database row and activates account.
  */
-export function maskEmail(email) {
-  if (!email) return '';
-  const [user, domain] = email.split('@');
-  if (!domain) return email;
-  if (user.length <= 2) return `${user[0]}*@${domain}`;
-  const first = user[0];
-  const last = user[user.length - 1];
-  return `${first}${'*'.repeat(Math.max(3, user.length - 2))}${last}@${domain}`;
-}
-
-/**
- * Dispatches the email containing Username and Temporary Password via free service (EmailJS)
- */
-export async function sendCredentialsEmail({ to_email, to_name, institutional_id, temp_password }) {
-  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID;
-  const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID;
-  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
-
-  if (serviceId && templateId && publicKey) {
-    try {
-      await fetch('https://api.emailjs.com/api/v1.0/email/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          service_id: serviceId,
-          template_id: templateId,
-          user_id: publicKey,
-          template_params: {
-            to_name,
-            to_email,
-            institutional_id,
-            temp_password,
-            login_url: typeof window !== 'undefined' ? window.location.origin : ''
-          }
-        })
-      });
-    } catch (err) {
-      console.warn('Email delivery error:', err);
-    }
-  }
-}
-
-/**
- * Request Access workflow:
- * 1. Verifies ID against database
- * 2. Generates temporary password & creates user account with must_change_password flag
- * 3. Dispatches automated invitation email to the user's inbox
- * 4. NEVER exposes the password on screen (security 2-layer gate)
- */
-export async function processAccessRequest({ role, institutionalId }) {
-  const verifyRes = await verifyInstitutionalId(role, institutionalId);
-  if (!verifyRes.success) {
-    return verifyRes;
-  }
-
-  const record = verifyRes.record;
-  const tempPassword = generateTempPassword();
-  const email = record.email;
-  const fullName = record.full_name;
-
-  // Dispatch email with credentials
-  await sendCredentialsEmail({
-    to_email: email,
-    to_name: fullName,
-    institutional_id: record.teacher_id || record.student_id,
-    temp_password: tempPassword
-  });
-
-  if (isSupabaseConfigured && supabase) {
-    try {
-      // 1. Sign up / Create user in Supabase Auth
-      const { error: authError } = await supabase.auth.signUp({
-        email: email,
-        password: tempPassword,
-        options: {
-          data: {
-            full_name: fullName,
-            role: role,
-            institutional_id: record.teacher_id || record.student_id,
-            institution: record.institution || 'inst-1',
-            must_change_password: true
-          }
-        }
-      });
-
-      // 2. Log in access_requests table
-      await supabase.from('access_requests').insert([{
-        role: role,
-        institutional_id: record.teacher_id || record.student_id,
-        full_name: fullName,
-        email: email,
-        status: authError ? 'rejected' : 'sent'
-      }]);
-
-      // 3. Update roster table status to active
-      const table = role === 'teacher' ? 'teachers' : 'students';
-      const idField = role === 'teacher' ? 'teacher_id' : 'student_id';
-      await supabase
-        .from(table)
-        .update({ status: 'active', registered_at: new Date().toISOString() })
-        .eq(idField, record[idField]);
-
-      if (authError && !authError.message.includes('User already registered')) {
-        console.warn('Supabase Auth notice:', authError.message);
-      }
-    } catch (err) {
-      console.warn('Error during Supabase access request:', err);
-    }
-  }
-
-  return {
-    success: true,
-    record: record,
-    email: email,
-    maskedEmail: maskEmail(email),
-    fullName: fullName,
-    role: role
-  };
-}
-
-/**
- * Authenticates user and checks role + password reset requirements
- */
-export async function authenticateUser({ email, password, loginType = 'user' }) {
-  const cleanEmail = (email || '').trim().toLowerCase();
-
-  // Admin login handling
-  if (loginType === 'admin') {
-    if (cleanEmail === ADMIN_CREDENTIALS.email.toLowerCase() && password) {
-      return {
-        success: true,
-        user: {
-          email: cleanEmail,
-          full_name: ADMIN_CREDENTIALS.full_name,
-          role: 'admin',
-          institution: ADMIN_CREDENTIALS.institution,
-          must_change_password: false
-        }
-      };
-    }
-  }
-
-  // Supabase Auth
-  if (isSupabaseConfigured && supabase) {
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password: password
-      });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      const user = data.user;
-      const metadata = user.user_metadata || {};
-      
-      // Admin check if logging into admin portal
-      if (loginType === 'admin' && metadata.role !== 'admin' && cleanEmail !== ADMIN_CREDENTIALS.email) {
-        await supabase.auth.signOut();
-        return { success: false, error: 'Access denied. This portal is restricted to Principal / Administrative personnel.' };
-      }
-
-      return {
-        success: true,
-        user: {
-          id: user.id,
-          email: user.email,
-          full_name: metadata.full_name || user.email.split('@')[0],
-          role: metadata.role || (loginType === 'admin' ? 'admin' : 'teacher'),
-          institution: metadata.institution || 'inst-1',
-          must_change_password: Boolean(metadata.must_change_password)
-        }
-      };
-    } catch (err) {
-      return { success: false, error: err.message || 'Authentication failed' };
-    }
-  }
-
-  // Local Mock Auth fallback
-  if (loginType === 'admin') {
-    if (cleanEmail.includes('admin') || cleanEmail.includes('principal')) {
-      return {
-        success: true,
-        user: {
-          email: cleanEmail,
-          full_name: 'Principal Arthur Davies',
-          role: 'admin',
-          institution: 'inst-1',
-          must_change_password: false
-        }
-      };
-    }
-    return { success: false, error: 'Invalid Principal credentials.' };
-  }
-
-  // Teacher / Student Mock fallback
-  const isTeacher = MOCK_TEACHERS.find(t => t.email.toLowerCase() === cleanEmail);
-  const isStudent = MOCK_STUDENTS.find(s => s.email.toLowerCase() === cleanEmail);
-
-  return {
-    success: true,
-    user: {
-      email: cleanEmail,
-      full_name: isTeacher ? isTeacher.full_name : isStudent ? isStudent.full_name : cleanEmail.split('@')[0],
-      role: isTeacher ? 'teacher' : isStudent ? 'student' : 'teacher',
-      institution: 'inst-1',
-      must_change_password: password.startsWith('EduVault-')
-    }
-  };
-}
-
-/**
- * Updates the user's password and clears the must_change_password flag
- */
-export async function updatePassword(newPassword) {
-  if (!newPassword || newPassword.length < 6) {
+export async function registerWithInstitutionalId({ role, institutionalId, password }) {
+  if (!password || password.length < 6) {
     return { success: false, error: 'Password must be at least 6 characters long.' };
   }
 
+  const verifyRes = await verifyInstitutionalId(role, institutionalId);
+  if (!verifyRes.success || !verifyRes.record) {
+    return { 
+      success: false, 
+      error: verifyRes.error || 'Institutional ID verification failed.' 
+    };
+  }
+
+  // Check if account already has a password set
+  if (verifyRes.isRegistered) {
+    return {
+      success: false,
+      isRegistered: true,
+      error: `Account already exists for this ${role === 'teacher' ? 'Teacher ID' : 'Student ID'}! Please log in.`,
+      record: verifyRes.record
+    };
+  }
+
+  const record = verifyRes.record;
+  const idField = role === 'teacher' ? 'teacher_id' : 'student_id';
+  const table = role === 'teacher' ? 'teachers' : 'students';
+  const actualId = record[idField];
+
+  // 1. Update database table
   if (isSupabaseConfigured && supabase) {
     try {
-      const { data, error } = await supabase.auth.updateUser({
-        password: newPassword,
-        data: { must_change_password: false }
+      await supabase
+        .from(table)
+        .update({ 
+          password: password, 
+          status: 'active', 
+          registered_at: new Date().toISOString() 
+        })
+        .eq(idField, actualId);
+
+      // Also create user in Supabase Auth if needed
+      await supabase.auth.signUp({
+        email: record.email,
+        password: password,
+        options: {
+          data: {
+            full_name: record.full_name,
+            role: role,
+            institutional_id: actualId,
+            institution: record.institution || 'inst-1'
+          }
+        }
       });
-
-      if (error) {
-        return { success: false, error: error.message };
-      }
-
-      return { success: true, user: data.user };
     } catch (err) {
-      return { success: false, error: err.message || 'Failed to update password' };
+      console.warn('Database registration update notice:', err);
     }
   }
 
-  return { success: true };
+  // 2. Update local mock data
+  const list = role === 'teacher' ? MOCK_TEACHERS : MOCK_STUDENTS;
+  const localItem = list.find(item => item[idField].toUpperCase() === actualId.toUpperCase());
+  if (localItem) {
+    localItem.password = password;
+    localItem.status = 'active';
+    localItem.registered_at = new Date().toISOString();
+  }
+
+  return {
+    success: true,
+    record: { ...record, password, status: 'active' },
+    user: {
+      id: actualId,
+      email: record.email,
+      full_name: record.full_name,
+      role: role,
+      institution: record.institution || 'inst-1'
+    }
+  };
+}
+
+/**
+ * Authenticates user using ID (Teacher ID / Student ID / Admin ID) OR Email + Password.
+ */
+export async function authenticateUser({ identifier, password, loginType = 'user' }) {
+  const cleanInput = (identifier || '').trim();
+  if (!cleanInput || !password) {
+    return { success: false, error: 'Please enter your ID/Email and password.' };
+  }
+
+  // Admin login handling
+  if (loginType === 'admin') {
+    const isEmailMatch = cleanInput.toLowerCase() === ADMIN_CREDENTIALS.email.toLowerCase();
+    const isIdMatch = cleanInput.toUpperCase() === ADMIN_CREDENTIALS.admin_id;
+    if ((isEmailMatch || isIdMatch) && password === ADMIN_CREDENTIALS.password) {
+      return {
+        success: true,
+        user: {
+          id: ADMIN_CREDENTIALS.admin_id,
+          email: ADMIN_CREDENTIALS.email,
+          full_name: ADMIN_CREDENTIALS.full_name,
+          role: 'admin',
+          institution: ADMIN_CREDENTIALS.institution
+        }
+      };
+    } else if (isEmailMatch || isIdMatch) {
+      return { success: false, error: 'Invalid administrator password.' };
+    }
+    return { success: false, error: 'No administrator account found with this ID or Email.' };
+  }
+
+  // 1. Try Supabase Query
+  if (isSupabaseConfigured && supabase) {
+    try {
+      // Check teachers table
+      const { data: teacherData } = await supabase
+        .from('teachers')
+        .select('*')
+        .or(`teacher_id.ilike.${cleanInput},email.ilike.${cleanInput}`)
+        .maybeSingle();
+
+      if (teacherData) {
+        if (!teacherData.password) {
+          return {
+            success: false,
+            isUnregistered: true,
+            error: `Teacher ID "${teacherData.teacher_id}" has not been registered yet. Please click Register to create your password.`
+          };
+        }
+        if (teacherData.password === password) {
+          return {
+            success: true,
+            user: {
+              id: teacherData.teacher_id,
+              email: teacherData.email,
+              full_name: teacherData.full_name,
+              role: 'teacher',
+              institution: teacherData.institution || 'inst-1'
+            }
+          };
+        }
+        return { success: false, error: 'Invalid password. Please check your credentials.' };
+      }
+
+      // Check students table
+      const { data: studentData } = await supabase
+        .from('students')
+        .select('*')
+        .or(`student_id.ilike.${cleanInput},email.ilike.${cleanInput}`)
+        .maybeSingle();
+
+      if (studentData) {
+        if (!studentData.password) {
+          return {
+            success: false,
+            isUnregistered: true,
+            error: `Student ID "${studentData.student_id}" has not been registered yet. Please click Register to create your password.`
+          };
+        }
+        if (studentData.password === password) {
+          return {
+            success: true,
+            user: {
+              id: studentData.student_id,
+              email: studentData.email,
+              full_name: studentData.full_name,
+              role: 'student',
+              institution: studentData.institution || 'inst-1'
+            }
+          };
+        }
+        return { success: false, error: 'Invalid password. Please check your credentials.' };
+      }
+    } catch (err) {
+      console.warn('Database login lookup failed, checking local store', err);
+    }
+  }
+
+  // 2. Check local mock lists
+  const teacherMatch = MOCK_TEACHERS.find(t => 
+    t.teacher_id.toUpperCase() === cleanInput.toUpperCase() || 
+    t.email.toLowerCase() === cleanInput.toLowerCase()
+  );
+
+  if (teacherMatch) {
+    if (!teacherMatch.password) {
+      return {
+        success: false,
+        isUnregistered: true,
+        error: `Teacher ID "${teacherMatch.teacher_id}" has not been registered yet. Please click Register to create your password.`
+      };
+    }
+    if (teacherMatch.password === password) {
+      return {
+        success: true,
+        user: {
+          id: teacherMatch.teacher_id,
+          email: teacherMatch.email,
+          full_name: teacherMatch.full_name,
+          role: 'teacher',
+          institution: teacherMatch.institution || 'inst-1'
+        }
+      };
+    }
+    return { success: false, error: 'Invalid password. Please check your credentials.' };
+  }
+
+  const studentMatch = MOCK_STUDENTS.find(s => 
+    s.student_id.toUpperCase() === cleanInput.toUpperCase() || 
+    s.email.toLowerCase() === cleanInput.toLowerCase()
+  );
+
+  if (studentMatch) {
+    if (!studentMatch.password) {
+      return {
+        success: false,
+        isUnregistered: true,
+        error: `Student ID "${studentMatch.student_id}" has not been registered yet. Please click Register to create your password.`
+      };
+    }
+    if (studentMatch.password === password) {
+      return {
+        success: true,
+        user: {
+          id: studentMatch.student_id,
+          email: studentMatch.email,
+          full_name: studentMatch.full_name,
+          role: 'student',
+          institution: studentMatch.institution || 'inst-1'
+        }
+      };
+    }
+    return { success: false, error: 'Invalid password. Please check your credentials.' };
+  }
+
+  return { 
+    success: false, 
+    error: `No account found for "${cleanInput}". Please click Register to create an account.` 
+  };
 }
