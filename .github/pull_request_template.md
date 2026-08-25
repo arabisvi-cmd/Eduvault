@@ -1,5 +1,5 @@
-## 📋 Description
+## Description
 
 
-## 🛠️ This PR does the following:
+## This PR does the following:
 
