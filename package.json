@@ -8,7 +8,14 @@
     "build": "vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:unit": "vitest run src/tests/unit",
+    "test:integration": "vitest run src/tests/integration",
+    "test:e2e": "vitest run src/tests/e2e",
+    "test:regression": "vitest run src/tests/regression",
+    "test:file-format": "vitest run src/tests/file-format",
+    "test:ui": "vitest run src/App.test.jsx",
+    "test:all": "vitest run"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.4",
