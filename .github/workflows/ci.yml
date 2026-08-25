@@ -30,7 +30,7 @@ jobs:
         run: npm run lint
 
   unit-tests:
-    name: "Unit Tests (Auth & Services)"
+    name: "Unit Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -50,7 +50,7 @@ jobs:
         run: npm run test:unit
 
   integration-tests:
-    name: "Integration Tests (Workspace & State)"
+    name: "Integration Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -70,7 +70,7 @@ jobs:
         run: npm run test:integration
 
   e2e-tests:
-    name: "E2E Workflow Tests (Student, Teacher, Admin)"
+    name: "End-to-End (E2E) Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -90,7 +90,7 @@ jobs:
         run: npm run test:e2e
 
   regression-tests:
-    name: "Regression & Boundary Defense Tests"
+    name: "Regression Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -110,7 +110,7 @@ jobs:
         run: npm run test:regression
 
   file-format-tests:
-    name: "File Format & Extension Tests"
+    name: "File Format Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
@@ -130,7 +130,7 @@ jobs:
         run: npm run test:file-format
 
   ui-tests:
-    name: "App Navigation & UI Rendering Tests"
+    name: "UI & Component Tests"
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repository
