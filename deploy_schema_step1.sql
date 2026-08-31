@@ -1,6 +1,15 @@
 -- ==============================================================================
--- EduVault Database Schema & RLS Setup (Phase 1)
+-- EduVault Remote Schema Deployment
+-- Run this ENTIRE script in the Supabase SQL Editor for project:
+-- https://supabase.com/dashboard/project/kxclbimagkfzhxkwcafk
 -- ==============================================================================
+-- SAFETY NOTE: This will DROP the legacy public.profiles and public.documents
+-- tables (which contain only mock seed data and no real uploaded files).
+-- Two auth users will need to be re-bootstrapped below in STEP 2.
+-- ==============================================================================
+
+-- STEP 1: Deploy Tasks 1-11 Schema
+-- (paste entire supabase/schema.sql content below)
 
 -- Enable UUID extension
 create extension if not exists "uuid-ossp";
@@ -21,14 +30,6 @@ drop table if exists public.profiles cascade;
 drop table if exists public.users cascade;
 drop table if exists public.institutions cascade;
 
--- ------------------------------------------------------------------------------
--- 1. Core Tenancy
--- ------------------------------------------------------------------------------
--- BOOTSTRAP DECISION: The first institution and the first ADMIN user must be created
--- manually via the Supabase Dashboard (SQL Editor) or a secure server-side script
--- using the Service Role Key. There is no public INSERT policy to prevent unauthorized
--- tenant creation.
-
 create table public.institutions (
   id uuid primary key default uuid_generate_v4(),
   name text not null,
@@ -36,7 +37,6 @@ create table public.institutions (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Application Users (Links to auth.users)
 create table public.users (
   id uuid primary key references auth.users on delete cascade,
   institution_id uuid not null references public.institutions(id) on delete cascade,
@@ -47,7 +47,6 @@ create table public.users (
   updated_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- RLS helper functions for fast evaluation
 create or replace function public.get_my_institution_id()
 returns uuid
 language sql security definer
@@ -64,17 +63,10 @@ as $$
   select role from public.users where id = auth.uid() limit 1;
 $$;
 
--- ------------------------------------------------------------------------------
--- 2. Academic Structure
--- ------------------------------------------------------------------------------
--- TERMINOLOGY MAPPING:
--- School structure: Program = Class, Term = Section, Subject = Subject
--- University structure: Program = Program, Term = Semester, Subject = Course
-
 create table public.academic_years (
   id uuid primary key default uuid_generate_v4(),
   institution_id uuid not null references public.institutions(id) on delete cascade,
-  name text not null, -- e.g. "2026-2027"
+  name text not null,
   is_active boolean default false,
   start_date date,
   end_date date,
@@ -85,7 +77,7 @@ create table public.academic_years (
 create table public.programs (
   id uuid primary key default uuid_generate_v4(),
   academic_year_id uuid not null references public.academic_years(id) on delete cascade,
-  name text not null, -- e.g. "Class 10" or "B.Sc Computer Science"
+  name text not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique (academic_year_id, name)
 );
@@ -93,7 +85,7 @@ create table public.programs (
 create table public.terms (
   id uuid primary key default uuid_generate_v4(),
   program_id uuid not null references public.programs(id) on delete cascade,
-  name text not null, -- e.g. "Section A" or "Semester 3"
+  name text not null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique (program_id, name)
 );
@@ -101,15 +93,12 @@ create table public.terms (
 create table public.subjects (
   id uuid primary key default uuid_generate_v4(),
   term_id uuid not null references public.terms(id) on delete cascade,
-  name text not null, -- e.g. "Physics" or "Data Structures"
+  name text not null,
   code text,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null,
   unique (term_id, name)
 );
 
--- ------------------------------------------------------------------------------
--- 3. Enrollments & Assignments
--- ------------------------------------------------------------------------------
 create table public.teacher_assignments (
   id uuid primary key default uuid_generate_v4(),
   user_id uuid not null references public.users(id) on delete cascade,
@@ -126,9 +115,6 @@ create table public.student_enrollments (
   unique (user_id, subject_id)
 );
 
--- ------------------------------------------------------------------------------
--- 4. Content (Folders, Documents)
--- ------------------------------------------------------------------------------
 create table public.folders (
   id uuid primary key default uuid_generate_v4(),
   subject_id uuid not null references public.subjects(id) on delete cascade,
@@ -155,22 +141,21 @@ create table public.document_versions (
   version_number integer not null default 1,
   storage_path text not null,
   file_type text not null,
-  file_size bigint not null, -- Stores bytes
-  uploaded_by uuid references public.users(id) on delete set null, -- Historical versions remain valid if user is removed
+  file_size bigint not null,
+  uploaded_by uuid references public.users(id) on delete set null,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
 create table public.notices (
   id uuid primary key default uuid_generate_v4(),
   institution_id uuid not null references public.institutions(id) on delete cascade,
-  subject_id uuid references public.subjects(id) on delete cascade, -- if null, institution-wide
+  subject_id uuid references public.subjects(id) on delete cascade,
   title text not null,
   content text not null,
   created_by uuid not null references public.users(id) on delete cascade,
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Trigger to verify notice institution matches subject institution
 create or replace function public.verify_notice_institution()
 returns trigger as $$
 declare
@@ -196,9 +181,6 @@ create trigger notice_institution_check
 before insert or update on public.notices
 for each row execute procedure public.verify_notice_institution();
 
--- ------------------------------------------------------------------------------
--- 5. Audit Logging
--- ------------------------------------------------------------------------------
 create table public.audit_logs (
   id uuid primary key default uuid_generate_v4(),
   institution_id uuid references public.institutions(id) on delete set null,
@@ -210,7 +192,6 @@ create table public.audit_logs (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
--- Trigger Function for automated audit logging (Documents Table as an example)
 create or replace function public.log_document_changes()
 returns trigger as $$
 declare
@@ -257,10 +238,7 @@ create trigger document_audit_trigger
 after insert or update or delete on public.documents
 for each row execute procedure public.log_document_changes();
 
--- ------------------------------------------------------------------------------
--- 6. Row Level Security (RLS)
--- ------------------------------------------------------------------------------
--- Enable RLS on all tables
+-- RLS
 alter table public.institutions enable row level security;
 alter table public.users enable row level security;
 alter table public.academic_years enable row level security;
@@ -275,28 +253,21 @@ alter table public.document_versions enable row level security;
 alter table public.notices enable row level security;
 alter table public.audit_logs enable row level security;
 
--- Institutions
 create policy "Users can view their own institution" on public.institutions
   for select using (id = public.get_my_institution_id());
-  
 create policy "Admins can update their institution" on public.institutions
   for update using (id = public.get_my_institution_id() and public.get_my_role() = 'ADMIN');
 
--- Users
 create policy "Users can view users in their institution" on public.users
   for select using (institution_id = public.get_my_institution_id());
-  
 create policy "Admins can manage users in their institution" on public.users
   for all using (institution_id = public.get_my_institution_id() and public.get_my_role() = 'ADMIN');
 
--- Academic Years
 create policy "Users can view academic years" on public.academic_years
   for select using (institution_id = public.get_my_institution_id());
-  
 create policy "Admins can manage academic years" on public.academic_years
   for all using (institution_id = public.get_my_institution_id() and public.get_my_role() = 'ADMIN');
 
--- Programs
 create policy "Users can view programs" on public.programs
   for select using (
     exists (select 1 from public.academic_years where id = academic_year_id and institution_id = public.get_my_institution_id())
@@ -307,7 +278,6 @@ create policy "Admins can manage programs" on public.programs
     and public.get_my_role() = 'ADMIN'
   );
 
--- Terms
 create policy "Users can view terms" on public.terms
   for select using (
     exists (
@@ -325,7 +295,6 @@ create policy "Admins can manage terms" on public.terms
     ) and public.get_my_role() = 'ADMIN'
   );
 
--- Subjects
 create policy "Users can view subjects" on public.subjects
   for select using (
     exists (
@@ -345,10 +314,8 @@ create policy "Admins can manage subjects" on public.subjects
     ) and public.get_my_role() = 'ADMIN'
   );
 
--- Teacher Assignments
 create policy "Teachers view their own assignments" on public.teacher_assignments
   for select using (user_id = auth.uid());
-  
 create policy "Admins manage teacher assignments in their institution" on public.teacher_assignments
   for all using (
     public.get_my_role() = 'ADMIN' 
@@ -361,10 +328,8 @@ create policy "Admins manage teacher assignments in their institution" on public
     )
   );
 
--- Student Enrollments
 create policy "Students view their own enrollments" on public.student_enrollments
   for select using (user_id = auth.uid());
-
 create policy "Teachers view enrollments for their subjects" on public.student_enrollments
   for select using (
     public.get_my_role() = 'TEACHER'
@@ -373,7 +338,6 @@ create policy "Teachers view enrollments for their subjects" on public.student_e
       where ta.subject_id = student_enrollments.subject_id and ta.user_id = auth.uid()
     )
   );
-
 create policy "Admins manage student enrollments in their institution" on public.student_enrollments
   for all using (
     public.get_my_role() = 'ADMIN' 
@@ -386,7 +350,6 @@ create policy "Admins manage student enrollments in their institution" on public
     )
   );
 
--- Folders
 create policy "Admins manage folders in their institution" on public.folders
   for all using (
     public.get_my_role() = 'ADMIN'
@@ -398,20 +361,17 @@ create policy "Admins manage folders in their institution" on public.folders
       where s.id = subject_id and ay.institution_id = public.get_my_institution_id()
     )
   );
-
 create policy "Teachers manage folders for their assigned subjects" on public.folders
   for all using (
     public.get_my_role() = 'TEACHER'
     and exists (select 1 from public.teacher_assignments ta where ta.subject_id = folders.subject_id and ta.user_id = auth.uid())
   );
-
 create policy "Students view folders for their enrolled subjects" on public.folders
   for select using (
     public.get_my_role() = 'STUDENT'
     and exists (select 1 from public.student_enrollments se where se.subject_id = folders.subject_id and se.user_id = auth.uid())
   );
 
--- Documents
 create policy "Admins can manage all documents in their institution" on public.documents
   for all using (
     public.get_my_role() = 'ADMIN' 
@@ -423,7 +383,6 @@ create policy "Admins can manage all documents in their institution" on public.d
       where s.id = subject_id and ay.institution_id = public.get_my_institution_id()
     )
   );
-
 create policy "Teachers can manage documents for their assigned subjects" on public.documents
   for all using (
     public.get_my_role() = 'TEACHER'
@@ -431,7 +390,6 @@ create policy "Teachers can manage documents for their assigned subjects" on pub
       select 1 from public.teacher_assignments ta where ta.subject_id = documents.subject_id and ta.user_id = auth.uid()
     )
   );
-
 create policy "Students can view PUBLISHED documents for their enrolled subjects" on public.documents
   for select using (
     public.get_my_role() = 'STUDENT'
@@ -441,7 +399,6 @@ create policy "Students can view PUBLISHED documents for their enrolled subjects
     )
   );
 
--- Document Versions
 create policy "Admins can manage document versions" on public.document_versions
   for all using (
     public.get_my_role() = 'ADMIN' 
@@ -454,7 +411,6 @@ create policy "Admins can manage document versions" on public.document_versions
       where d.id = document_id and ay.institution_id = public.get_my_institution_id()
     )
   );
-
 create policy "Teachers can manage document versions for their subjects" on public.document_versions
   for all using (
     public.get_my_role() = 'TEACHER'
@@ -464,7 +420,6 @@ create policy "Teachers can manage document versions for their subjects" on publ
       where d.id = document_id and ta.user_id = auth.uid()
     )
   );
-
 create policy "Students can view latest document versions for enrolled subjects" on public.document_versions
   for select using (
     public.get_my_role() = 'STUDENT'
@@ -475,48 +430,33 @@ create policy "Students can view latest document versions for enrolled subjects"
     )
   );
 
--- Notices
 create policy "Admins manage notices in their institution" on public.notices
   for all using (public.get_my_role() = 'ADMIN' and institution_id = public.get_my_institution_id());
-
 create policy "Teachers manage notices for their subjects" on public.notices
   for all using (
     public.get_my_role() = 'TEACHER'
     and institution_id = public.get_my_institution_id()
     and exists (select 1 from public.teacher_assignments ta where ta.subject_id = notices.subject_id and ta.user_id = auth.uid())
   );
-
 create policy "Students view notices in their institution" on public.notices
   for select using (
     institution_id = public.get_my_institution_id()
     and (subject_id is null or exists (select 1 from public.student_enrollments se where se.subject_id = notices.subject_id and se.user_id = auth.uid()))
   );
 
--- Audit Logs
 create policy "Admins view audit logs in their institution" on public.audit_logs
   for select using (public.get_my_role() = 'ADMIN' and institution_id = public.get_my_institution_id());
-
--- System insert audit logs via triggers (RLS not strictly needed for security definer triggers, but good practice)
 create policy "System insert audit logs" on public.audit_logs
   for insert with check (auth.role() = 'authenticated' or auth.role() = 'service_role');
 
-
--- ------------------------------------------------------------------------------
--- 7. Storage Buckets & Policies
--- ------------------------------------------------------------------------------
--- Note: the following requires the storage schema to exist.
+-- Storage
 insert into storage.buckets (id, name, public) 
 values ('eduvault-documents', 'eduvault-documents', false)
 on conflict (id) do nothing;
-
--- SECURITY NOTICE:
--- Complete Storage RLS REQUIRES future application logic.
--- Currently, we block all operations until exact bucket paths (e.g. {institution_id}/{subject_id}/...) 
--- are finalized and safely verifiable in PostgreSQL Storage RLS using complex joins or path tokenization.
--- DO NOT grant broad bucket-level access.
 
 create policy "Storage access requires future upload implementation" on storage.objects
   for all using (false);
 
 grant usage on schema public to anon, authenticated, service_role;
 grant all privileges on all tables in schema public to anon, authenticated, service_role;
+

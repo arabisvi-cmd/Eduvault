@@ -7,13 +7,12 @@ import {
   Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, Sparkles, X, Check,
-  Share2, FolderInput, Copy, Pencil, ExternalLink, Settings, Bell
+  Share2, FolderInput, Copy, Pencil, ExternalLink, Settings
 } from 'lucide-react';
 import AdminAcademicManager from './AdminAcademicManager';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import MySubjects from './MySubjects';
 import GlobalSearch from './GlobalSearch';
-import Notices from './Notices';
 
 const INITIAL_FOLDERS = [
   { id: "folder-1", name: "Physics Lecture Slides", path: "in EduVault Drive" },
@@ -335,6 +334,12 @@ function Modal({ title, icon: Icon, onClose, children }) {
 }
 
 function App() {
+  const [documents, setDocuments] = useState(INITIAL_DOCUMENTS);
+  const [filterInst, setFilterInst] = useState("inst-1");
+  const [filterYear, setFilterYear] = useState("2026-2027");
+  const [filterClass, setFilterClass] = useState("grade-10");
+  const [filterSubject, setFilterSubject] = useState("physics");
+  const [filterTimeline, setFilterTimeline] = useState("term-1");
   const [searchQuery, setSearchQuery] = useState("");
   
   // Navigation & Authentication states
@@ -342,10 +347,6 @@ function App() {
   const [currentUser, setCurrentUser] = useState(null); // Supabase session user object
   const [userProfile, setUserProfile] = useState(null); // Database public.users profile
   const [isAuthLoading, setIsAuthLoading] = useState(true);
-
-  // Home dashboard: real counts from Supabase (null = loading, -1 = error/unavailable)
-  const [homeStats, setHomeStats] = useState(null);
-  const [institutionName, setInstitutionName] = useState(null);
   
   // Form states
   const [emailInput, setEmailInput] = useState("");
@@ -357,8 +358,7 @@ function App() {
   const [toast, setToast] = useState({ show: false, message: "", icon: "info" });
   
   // Workspace specific states
-  const [selectedNav, setSelectedNav] = useState("home"); // 'home', 'admin-academic', 'classes', 'my-vault', 'notices' | legacy: 'shared', 'recent', 'starred', 'trash', 'storage'
-  const [showLegacyNav, setShowLegacyNav] = useState(false);
+  const [selectedNav, setSelectedNav] = useState("home"); // 'home', 'classes', 'my-vault', 'shared', 'recent', 'starred', 'trash', 'storage'
   const [workspaceViewMode, setWorkspaceViewMode] = useState("grid"); // 'grid' | 'list'
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const [suggestedFoldersOpen, setSuggestedFoldersOpen] = useState(true);
@@ -387,13 +387,6 @@ function App() {
   const [renamingFolder, setRenamingFolder] = useState(null);
   const [renameFolderInputVal, setRenameFolderInputVal] = useState("");
   const [sharingFolder, setSharingFolder] = useState(null);
-
-  // Appearance System
-  const [appearance, setAppearance] = useState(() => localStorage.getItem('eduvault-appearance') || 'system');
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', appearance);
-    localStorage.setItem('eduvault-appearance', appearance);
-  }, [appearance]);
   
   const workspaceFileInputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -404,6 +397,8 @@ function App() {
     setToast({ show: true, message, icon });
   };
 
+  // Navigation active subject for global search
+  const [activeSubject, setActiveSubject] = useState(null);
 
   useEffect(() => {
     if (isCreatingFolder && inlineFolderInputRef.current) {
@@ -522,66 +517,15 @@ function App() {
       subscription?.unsubscribe();
     };
   }, []);
-
-  // Load home dashboard stats when the user profile is available
-  useEffect(() => {
-    if (!userProfile || !isSupabaseConfigured || !supabase) return;
-    let cancelled = false;
-    async function loadStats() {
-      try {
-        // Institution name
-        if (userProfile.institution_id) {
-          const { data: inst } = await supabase
-            .from('institutions')
-            .select('name')
-            .eq('id', userProfile.institution_id)
-            .single();
-          if (!cancelled && inst) setInstitutionName(inst.name);
-        }
-
-        // Counts — only query tables the user can read under current RLS
-        const counts = {};
-        const [years, programs, subjects, docs, notices] = await Promise.allSettled([
-          supabase.from('academic_years').select('id', { count: 'exact', head: true }),
-          supabase.from('programs').select('id', { count: 'exact', head: true }),
-          supabase.from('subjects').select('id', { count: 'exact', head: true }),
-          supabase.from('documents').select('id', { count: 'exact', head: true }),
-          supabase.from('notices').select('id', { count: 'exact', head: true }),
-        ]);
-        counts.years    = years.status    === 'fulfilled' && !years.value.error    ? (years.value.count    ?? 0) : null;
-        counts.programs = programs.status === 'fulfilled' && !programs.value.error ? (programs.value.count ?? 0) : null;
-        counts.subjects = subjects.status === 'fulfilled' && !subjects.value.error ? (subjects.value.count ?? 0) : null;
-        counts.docs     = docs.status     === 'fulfilled' && !docs.value.error     ? (docs.value.count     ?? 0) : null;
-        counts.notices  = notices.status  === 'fulfilled' && !notices.value.error  ? (notices.value.count  ?? 0) : null;
-
-        // Teacher-specific
-        if (userProfile.role === 'TEACHER') {
-          const { count, error } = await supabase
-            .from('teacher_assignments')
-            .select('id', { count: 'exact', head: true })
-            .eq('teacher_id', userProfile.id);
-          counts.assignments = !error ? (count ?? 0) : null;
-        }
-        // Student-specific
-        if (userProfile.role === 'STUDENT') {
-          const { count, error } = await supabase
-            .from('student_enrollments')
-            .select('id', { count: 'exact', head: true })
-            .eq('student_id', userProfile.id);
-          counts.enrollments = !error ? (count ?? 0) : null;
-        }
-
-        if (!cancelled) setHomeStats(counts);
-      } catch (err) {
-        console.warn('Could not load home stats', err);
-        if (!cancelled) setHomeStats({});
-      }
-    }
-    loadStats();
-    return () => { cancelled = true; };
-  }, [userProfile]);
-
-  const [documents, setDocuments] = useState(INITIAL_DOCUMENTS);
+  const filteredDocs = documents.filter(doc => {
+    if (filterInst !== 'all' && doc.institution !== filterInst) return false;
+    if (filterYear !== 'all' && doc.year !== filterYear) return false;
+    if (filterClass !== 'all' && doc.class !== filterClass) return false;
+    if (filterSubject !== 'all' && doc.subject !== filterSubject) return false;
+    if (filterTimeline !== 'all' && doc.timeline !== filterTimeline) return false;
+    if (searchQuery && !doc.title.toLowerCase().includes(searchQuery.toLowerCase().trim())) return false;
+    return true;
+  });
 
   // Workspace Filtered Documents
   const workspaceFilteredDocs = documents.filter(doc => {
@@ -1000,31 +944,41 @@ function App() {
             <span className="logo-text">Edu<span>Vault</span></span>
           </div>
 
-          {currentView === "home" && (
+          {(currentView === "home" || currentView === "workspace") && (
             <nav className="nav-links">
-              <a href="#how-it-works">How it works</a>
-              <a href="#who-we-serve">Who uses it</a>
-              <a href="#portals">Institutional Portals</a>
+              <a 
+                href="#concept" 
+                className={currentView === "home" ? "active" : ""} 
+                onClick={(e) => { 
+                  if(currentView !== "home") { 
+                    e.preventDefault(); 
+                    setCurrentView("home"); 
+                  } 
+                }}
+              >
+                Home
+              </a>
+              {currentView === "home" && <a href="#workspace">Interactive Demo</a>}
+              {currentView === "home" && <a href="#roadmap">R&D Roadmap</a>}
+              <a 
+                href="#workspace-page" 
+                className={currentView === "workspace" ? "active" : ""} 
+                onClick={(e) => { 
+                  e.preventDefault(); 
+                  setCurrentView("workspace"); 
+                }}
+              >
+                Workspace
+              </a>
             </nav>
           )}
 
           <div className="header-actions">
             {currentUser ? (
-              <div className="user-profile-header" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <select 
-                  value={appearance} 
-                  onChange={(e) => setAppearance(e.target.value)}
-                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid var(--ev-border)', background: 'var(--ev-surface)', color: 'var(--ev-text)' }}
-                  aria-label="Appearance"
-                >
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                  <option value="amoled">AMOLED</option>
-                </select>
+              <div className="user-profile-header">
                 <button className="btn btn-secondary" onClick={handleLogout}>
                   <Mail size={16} />
-                  <span>{currentUser?.email} (Logout)</span>
+                  <span>{currentUser} (Logout)</span>
                 </button>
               </div>
             ) : (
@@ -1054,113 +1008,263 @@ function App() {
 
       <main className="main-content">
         {currentView === "home" ? (
-          <div className="ev-landing-page">
+          <>
             {/* Hero Section */}
-            <section className="ev-hero-section">
-              <div className="container ev-hero-container">
-                <div className="ev-hero-badge">The Standard for Academic Security</div>
-                <h1 className="ev-hero-title">Your institution's academic knowledge, organized.</h1>
-                <p className="ev-hero-subtitle">
-                  A secure academic workspace for schools and universities to organize learning materials, manage access, and make knowledge available to the right people at the right time.
+            <section id="concept" className="hero-section">
+              <div className="container">
+                <div className="badge">
+                  <span className="badge-dot"></span>
+                  <span>Project Vision & Roadmap</span>
+                </div>
+                <h1 className="hero-title">Secure Workspace for <span className="gradient-text">Academic Documents</span></h1>
+                <p className="hero-subtitle">
+                  Centralizing scattered classwork, administrative resources, and timelines. React components built to support the high scale load of educational institutions.
                 </p>
                 
-                <div className="ev-hero-buttons">
-                  <button className="btn btn-primary btn-lg" onClick={() => { setCurrentView("login"); setEmailInput(""); }}>
-                    <span>Enter EduVault</span>
+                <div className="hero-search-wrapper">
+                  <div className="search-box hero-search-box">
+                    <Search />
+                    <input 
+                      type="text" 
+                      data-testid="hero-search-input"
+                      placeholder="Quickly search files (e.g. Physics, Lab Report)..." 
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onFocus={() => document.getElementById('workspace')?.scrollIntoView({ behavior: 'smooth' })}
+                    />
+                  </div>
+                </div>
+
+                <div className="hero-buttons">
+                  <button className="btn btn-primary btn-lg" onClick={() => setCurrentView("workspace")}>
+                    <span>Launch EduVault Workspace</span>
                     <ArrowRight size={18} />
                   </button>
-                  <a href="#how-it-works" className="btn btn-secondary btn-lg" style={{textDecoration: 'none'}}>
-                    <span>Learn how it works</span>
-                  </a>
-                </div>
-              </div>
-            </section>
-
-            {/* How It Works Section */}
-            <section id="how-it-works" className="ev-concept-section">
-              <div className="container">
-                <div className="ev-section-header">
-                  <h2>The EduVault Workflow</h2>
-                  <p>A secure lifecycle from institutional creation to student access.</p>
-                </div>
-                
-                <div className="ev-workflow-steps">
-                  <div className="ev-step">
-                    <div className="ev-step-icon"><School size={32} /></div>
-                    <h4>Institution</h4>
-                    <p>Defines academic structure</p>
-                  </div>
-                  <div className="ev-step-arrow"><ArrowRight size={24} /></div>
-                  <div className="ev-step">
-                    <div className="ev-step-icon"><FileText size={32} /></div>
-                    <h4>Teachers</h4>
-                    <p>Prepare material (Locked)</p>
-                  </div>
-                  <div className="ev-step-arrow"><ArrowRight size={24} /></div>
-                  <div className="ev-step">
-                    <div className="ev-step-icon" style={{color: 'var(--ev-locked)'}}><Lock size={32} /></div>
-                    <h4>Unlock</h4>
-                    <p>Teacher releases material</p>
-                  </div>
-                  <div className="ev-step-arrow"><ArrowRight size={24} /></div>
-                  <div className="ev-step">
-                    <div className="ev-step-icon"><Users size={32} /></div>
-                    <h4>Students</h4>
-                    <p>Access published material</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Users Section */}
-            <section id="who-we-serve" className="ev-users-section">
-              <div className="container">
-                <div className="ev-section-header">
-                  <h2>Built for the Academic Community</h2>
-                </div>
-                <div className="ev-users-grid">
-                  <div className="ev-user-card">
-                    <div className="ev-user-icon-wrap"><Users size={32} /></div>
-                    <h3>Students</h3>
-                    <p>Find the academic materials relevant to your enrolled subjects seamlessly, all in one central location.</p>
-                  </div>
-                  <div className="ev-user-card">
-                    <div className="ev-user-icon-wrap"><BookOpen size={32} /></div>
-                    <h3>Teachers</h3>
-                    <p>Prepare, organize, and tightly control exactly when materials become available to your classes.</p>
-                  </div>
-                  <div className="ev-user-card">
-                    <div className="ev-user-icon-wrap"><Shield size={32} /></div>
-                    <h3>Institutions</h3>
-                    <p>Manage academic structure, people, documents, and institutional communication securely.</p>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* Institution Portal Concept */}
-            <section id="portals" className="ev-portal-section">
-              <div className="container">
-                <div className="ev-portal-content">
-                  <h2>Your Academic Portal</h2>
-                  <p>
-                    Participating institutions receive their own dedicated, secure EduVault portal (e.g. <strong>schoolname.eduvault.in</strong>) to unify all digital academic operations.
-                  </p>
-                  <button className="btn btn-secondary btn-lg ev-portal-btn" onClick={() => setCurrentView("signup")}>
-                    <School size={18} />
-                    <span>Register your Institution</span>
+                  <button className="btn btn-secondary btn-lg" onClick={() => document.getElementById('roadmap')?.scrollIntoView({ behavior: 'smooth' })}>
+                    <span>View R&D Roadmap</span>
                   </button>
                 </div>
               </div>
             </section>
-          </div>
+
+            {/* Interactive Workspace Showcase Section */}
+            <section id="workspace" className="workspace-section">
+              <div className="container">
+                <div className="section-header">
+                  <h2>Interactive Workspace Preview</h2>
+                  <p>Experience how EduVault structures files organically by institution, year, class, subject, and timeline.</p>
+                </div>
+
+                <div className="workspace-card">
+                  {/* Sidebar Filters */}
+                  <aside className="workspace-sidebar">
+                    <div className="sidebar-header">
+                      <Filter />
+                      <span>Filter Documents</span>
+                    </div>
+                    <div className="filter-group">
+                      <label><School /> Institution</label>
+                      <select value={filterInst} onChange={(e) => setFilterInst(e.target.value)}>
+                        <option value="all">All Institutions</option>
+                        <option value="inst-1">St. Xavier High School</option>
+                        <option value="inst-2">Cambridge Global Academy</option>
+                      </select>
+                    </div>
+                    <div className="filter-group">
+                      <label><Calendar /> Academic Year</label>
+                      <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)}>
+                        <option value="2026-2027">2026 - 2027 (Current)</option>
+                        <option value="2025-2026">2025 - 2026</option>
+                      </select>
+                    </div>
+                    <div className="filter-group">
+                      <label><Users /> Class / Grade</label>
+                      <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)}>
+                        <option value="all">All Classes</option>
+                        <option value="grade-10">Grade 10 - Section A</option>
+                        <option value="grade-11">Grade 11 - Science</option>
+                        <option value="grade-12">Grade 12 - Commerce</option>
+                      </select>
+                    </div>
+                    <div className="filter-group">
+                      <label><BookOpen /> Subject</label>
+                      <select value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)}>
+                        <option value="all">All Subjects</option>
+                        <option value="physics">Physics</option>
+                        <option value="mathematics">Mathematics</option>
+                        <option value="chemistry">Chemistry</option>
+                        <option value="english">English Literature</option>
+                      </select>
+                    </div>
+                    <div className="filter-group">
+                      <label><Clock /> Timeline / Term</label>
+                      <select value={filterTimeline} onChange={(e) => setFilterTimeline(e.target.value)}>
+                        <option value="all">All Terms</option>
+                        <option value="term-1">Term 1 (Mid-Term)</option>
+                        <option value="term-2">Term 2 (Finals)</option>
+                      </select>
+                    </div>
+                  </aside>
+
+                  {/* Main Workspace Area */}
+                  <div className="workspace-main">
+                    <div className="workspace-top-bar">
+                      <div className="search-box">
+                        <Search />
+                        <input 
+                          type="text" 
+                          placeholder="Search resources, assignments, exams..." 
+                          value={searchQuery}
+                          onChange={(e) => setSearchQuery(e.target.value)}
+                        />
+                      </div>
+                      <div className="upload-zone-wrapper">
+                        <button className="btn btn-primary" onClick={() => fileInputRef.current.click()}>
+                          <UploadCloud />
+                          <span>Upload Document</span>
+                        </button>
+                        <input 
+                          type="file" 
+                          ref={fileInputRef} 
+                          style={{ display: 'none' }} 
+                          onChange={(e) => {
+                            const file = e.target.files[0];
+                            if (!file) return;
+                            const newDoc = {
+                              id: documents.length + 1,
+                              title: file.name.replace(/\.[^/.]+$/, ""),
+                              institution: filterInst === 'all' ? 'inst-1' : filterInst,
+                              year: filterYear === 'all' ? '2026-2027' : filterYear,
+                              class: filterClass === 'all' ? 'grade-10' : filterClass,
+                              subject: filterSubject === 'all' ? 'physics' : filterSubject,
+                              timeline: filterTimeline === 'all' ? 'term-1' : filterTimeline,
+                              type: 'pdf',
+                              size: (file.size / (1024 * 1024)).toFixed(1) + ' MB',
+                              date: new Date().toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+                            };
+                            setDocuments([newDoc, ...documents]);
+                            showToast(`Uploaded "${newDoc.title}"`, "check-circle");
+                          }} 
+                        />
+                      </div>
+                    </div>
+
+                    {/* Breadcrumb & Stats */}
+                    <div className="workspace-breadcrumb">
+                      <span className="breadcrumb-text">{getBreadcrumb()}</span>
+                      <span className="items-count">{filteredDocs.length} item{filteredDocs.length === 1 ? '' : 's'} found</span>
+                    </div>
+
+                    {/* Documents Grid */}
+                    <div className="documents-grid">
+                      {filteredDocs.length === 0 ? (
+                        <div style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '3rem 0', color: 'var(--text-secondary)' }}>
+                          <FolderOpen style={{ width: 48, height: 48, marginBottom: '1rem', opacity: 0.5 }} />
+                          <p>No documents match the selected filters or search query.</p>
+                        </div>
+                      ) : (
+                        filteredDocs.map(doc => (
+                          <div key={doc.id} className="doc-card" onClick={() => showToast(`Opening: ${doc.title}`)}>
+                            <div className={`doc-icon-wrapper ${doc.type}`}>
+                              {getDocIcon(doc.type)}
+                            </div>
+                            <div className="doc-title" title={doc.title}>{doc.title}</div>
+                            <div className="doc-details">
+                              <span className="doc-tag">{doc.type.toUpperCase()}</span>
+                              <span>{doc.size}</span>
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* R&D Roadmap Section */}
+            <section id="roadmap" className="roadmap-section">
+              <div className="container">
+                <div className="section-header">
+                  <h2>Research & Development Roadmap</h2>
+                  <p>Our phased journey to designing and deploying the next generation of secure educational file systems.</p>
+                </div>
+
+                <div className="roadmap-timeline">
+                  <div className="roadmap-item active">
+                    <div className="phase-number">Phase 1</div>
+                    <div className="roadmap-card">
+                      <div className="card-header">
+                        <h3>Architecture & Multi-Tenancy</h3>
+                        <span className="phase-status status-active">In Progress</span>
+                      </div>
+                      <p>Designing the database schema for highly isolated multi-tenancy. Setting up dynamic metadata nodes linking documents to academic years, institutions, and classes.</p>
+                      <ul className="phase-bullets">
+                        <li><CheckCircle className="check" size={16} /> <span>Multi-tenant data partition layouts</span></li>
+                        <li><CheckCircle className="check" size={16} /> <span>Structured folder mapping schemas</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Real-time access policy engines</span></li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="roadmap-item">
+                    <div className="phase-number">Phase 2</div>
+                    <div className="roadmap-card">
+                      <div className="card-header">
+                        <h3>Identity & Granular Access</h3>
+                        <span className="phase-status">Q4 2026</span>
+                      </div>
+                      <p>Implementing security policies where teachers can publish, administrators can audit, and parents/students can only view designated timelines.</p>
+                      <ul className="phase-bullets">
+                        <li><Circle className="pending" size={16} /> <span>Granular role-based access control (RBAC)</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Single-sign-on (SSO) for schools</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Expiring download token generator</span></li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="roadmap-item">
+                    <div className="phase-number">Phase 3</div>
+                    <div className="roadmap-card">
+                      <div className="card-header">
+                        <h3>Distributed File Store & CDN</h3>
+                        <span className="phase-status">Q1 2027</span>
+                      </div>
+                      <p>Integrating distributed storage services to handle large volumes of scanned assignments, exam papers, and educational videos with rapid local delivery.</p>
+                      <ul className="phase-bullets">
+                        <li><Circle className="pending" size={16} /> <span>High-performance object storage bindings</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Edge caching for resource downloads</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Automatic mobile file optimization</span></li>
+                      </ul>
+                    </div>
+                  </div>
+
+                  <div className="roadmap-item">
+                    <div className="phase-number">Phase 4</div>
+                    <div className="roadmap-card">
+                      <div className="card-header">
+                        <h3>AI Auto-Categorization & Search</h3>
+                        <span className="phase-status">Q2 2027</span>
+                      </div>
+                      <p>Utilizing semantic search and OCR models to automatically scan uploaded worksheets, extract text, and index files into their respective classes/timeline nodes.</p>
+                      <ul className="phase-bullets">
+                        <li><Circle className="pending" size={16} /> <span>Intelligent PDF OCR extraction</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Auto-tagging suggestions based on contents</span></li>
+                        <li><Circle className="pending" size={16} /> <span>Natural Language query interface</span></li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </>
         ) : currentView === "workspace" ? (
           isAuthLoading ? (
-            <div className="auth-loading-state" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: 'var(--ev-text)' }}>
+            <div className="auth-loading-state" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: '#fff' }}>
               <h2>Loading Workspace...</h2>
             </div>
           ) : (!currentUser || !userProfile) ? (
-            <div className="auth-error-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', color: 'var(--ev-text)' }}>
+            <div className="auth-error-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', color: '#fff' }}>
               <h2>Access Denied</h2>
               <p>You must log in to access the workspace.</p>
               <br/>
@@ -1168,24 +1272,16 @@ function App() {
             </div>
           ) : (
           /* ==========================================================================
-             EDUVAULT ACADEMIC WORKSPACE
+             EDUVAULT DRIVE WORKSPACE (DRIVE-INSPIRED INTERFACE)
              ========================================================================== */
           <div className="gdrive-layout">
             {/* Left Sidebar */}
             <aside className="gdrive-sidebar">
-              {/* User Identity Block */}
-              <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--ev-divider)', marginBottom: '8px' }}>
-                <div style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--ev-text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {userProfile?.full_name || currentUser?.email?.split('@')[0] || 'User'}
-                </div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--ev-text-secondary)', marginTop: '2px' }}>
-                  {userProfile?.role}
-                  {userProfile?.institution_id && (
-                    <span style={{ marginLeft: '6px', opacity: 0.7 }}>· {userProfile.institution_id.slice(0, 8)}…</span>
-                  )}
-                </div>
+              <div style={{ padding: '15px', borderBottom: '1px solid #333', marginBottom: '10px' }}>
+                <div style={{ fontWeight: '600', color: '#e8eaed' }}>Role: {userProfile.role}</div>
+                <div style={{ fontSize: '0.8rem', color: '#9aa0a6' }}>Inst ID: {userProfile.institution_id.split('-')[0]}...</div>
               </div>
-
+              
               {/* + New Button with Dropdown */}
               <div className="gdrive-new-wrapper" ref={newDropdownRef}>
                 <button 
@@ -1205,7 +1301,6 @@ function App() {
                         setNewFolderName("Untitled folder");
                         setShowNewDropdown(false);
                         setSuggestedFoldersOpen(true);
-                        setSelectedNav('my-vault');
                       }}
                     >
                       <Folder size={18} />
@@ -1214,10 +1309,12 @@ function App() {
                     <div className="dropdown-divider"></div>
                     <button 
                       className="dropdown-item" 
-                      onClick={() => workspaceFileInputRef.current.click()}
+                      onClick={() => {
+                        workspaceFileInputRef.current.click();
+                      }}
                     >
                       <UploadCloud size={18} />
-                      <span>Upload material</span>
+                      <span>File upload</span>
                     </button>
                   </div>
                 )}
@@ -1230,7 +1327,7 @@ function App() {
                 />
               </div>
 
-              {/* Primary Academic Navigation */}
+              {/* Sidebar Navigation Links */}
               <nav className="gdrive-nav-list">
                 <button 
                   className={`gdrive-nav-item ${selectedNav === 'home' && activeFolderId === null ? 'active' : ''}`}
@@ -1240,106 +1337,125 @@ function App() {
                   <span>Home</span>
                 </button>
 
-                {userProfile?.role === 'ADMIN' && (
-                  <button 
-                    className={`gdrive-nav-item ${selectedNav === 'admin-academic' ? 'active' : ''}`}
-                    onClick={() => { setSelectedNav('admin-academic'); setActiveFolderId(null); }}
-                  >
-                    <Settings size={18} />
-                    <span>Academic Structure</span>
-                  </button>
-                )}
-
                 <button 
                   className={`gdrive-nav-item ${selectedNav === 'classes' ? 'active' : ''}`}
                   onClick={() => { setSelectedNav('classes'); setActiveFolderId(null); }}
                 >
                   <School size={18} />
-                  <span>My Subjects</span>
+                  <span>Classes & Subjects</span>
                 </button>
 
                 <button 
                   className={`gdrive-nav-item ${selectedNav === 'my-vault' ? 'active' : ''}`}
                   onClick={() => { setSelectedNav('my-vault'); setActiveFolderId(null); }}
                 >
+                  <ChevronRight size={14} className="nav-chevron" />
                   <HardDrive size={18} />
-                  <span>Materials</span>
+                  <span>My Vault</span>
                 </button>
 
                 <button 
-                  className={`gdrive-nav-item ${selectedNav === 'notices' ? 'active' : ''}`}
-                  onClick={() => { setSelectedNav('notices'); setActiveFolderId(null); }}
+                  className={`gdrive-nav-item ${selectedNav === 'shared' ? 'active' : ''}`}
+                  onClick={() => { setSelectedNav('shared'); setActiveFolderId(null); }}
                 >
-                  <Bell size={18} />
-                  <span>Notices</span>
+                  <Users size={18} />
+                  <span>Shared with me</span>
                 </button>
 
-                {/* Legacy Drive items — collapsed, not primary */}
-                <div className="gdrive-nav-divider" style={{ margin: '12px 0 8px' }}></div>
-                <button
-                  className="gdrive-nav-item"
-                  style={{ opacity: 0.5, fontSize: '0.8rem' }}
-                  onClick={() => setShowLegacyNav(v => !v)}
-                  title="Legacy prototype features (not academic)"
-                >
-                  <Archive size={16} />
-                  <span>{showLegacyNav ? 'Hide legacy' : 'Legacy features'}</span>
-                  <ChevronDown size={14} style={{ marginLeft: 'auto', transform: showLegacyNav ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
-                </button>
+                <div className="gdrive-nav-divider"></div>
 
-                {showLegacyNav && (
-                  <div style={{ opacity: 0.55 }}>
+                {userProfile?.role === 'ADMIN' && (
+                  <>
                     <button 
-                      className={`gdrive-nav-item ${selectedNav === 'shared' ? 'active' : ''}`}
-                      onClick={() => { setSelectedNav('shared'); setActiveFolderId(null); }}
+                      className={`gdrive-nav-item ${selectedNav === 'admin-academic' ? 'active' : ''}`}
+                      onClick={() => { setSelectedNav('admin-academic'); setActiveFolderId(null); }}
                     >
-                      <Users size={16} />
-                      <span>Shared with me</span>
+                      <Settings size={18} />
+                      <span>Academic Structure</span>
                     </button>
-                    <button 
-                      className={`gdrive-nav-item ${selectedNav === 'recent' ? 'active' : ''}`}
-                      onClick={() => { setSelectedNav('recent'); setActiveFolderId(null); }}
-                    >
-                      <Clock size={16} />
-                      <span>Recent</span>
-                    </button>
-                    <button 
-                      className={`gdrive-nav-item ${selectedNav === 'starred' ? 'active' : ''}`}
-                      onClick={() => { setSelectedNav('starred'); setActiveFolderId(null); }}
-                    >
-                      <Star size={16} />
-                      <span>Starred</span>
-                    </button>
-                    <button 
-                      className={`gdrive-nav-item ${selectedNav === 'trash' ? 'active' : ''}`}
-                      onClick={() => { setSelectedNav('trash'); setActiveFolderId(null); }}
-                    >
-                      <Trash2 size={16} />
-                      <span>Trash</span>
-                    </button>
-                    <button 
-                      className={`gdrive-nav-item ${selectedNav === 'storage' ? 'active' : ''}`}
-                      onClick={() => { setSelectedNav('storage'); setActiveFolderId(null); }}
-                    >
-                      <Cloud size={16} />
-                      <span>Storage</span>
-                    </button>
-                  </div>
+                    <div className="gdrive-nav-divider"></div>
+                  </>
                 )}
+
+                <button 
+                  className={`gdrive-nav-item ${selectedNav === 'recent' ? 'active' : ''}`}
+                  onClick={() => { setSelectedNav('recent'); setActiveFolderId(null); }}
+                >
+                  <Clock size={18} />
+                  <span>Recent</span>
+                </button>
+
+                <button 
+                  className={`gdrive-nav-item ${selectedNav === 'starred' ? 'active' : ''}`}
+                  onClick={() => { setSelectedNav('starred'); setActiveFolderId(null); }}
+                >
+                  <Star size={18} />
+                  <span>Starred</span>
+                </button>
+
+                <div className="gdrive-nav-divider"></div>
+
+                <button 
+                  className={`gdrive-nav-item ${selectedNav === 'trash' ? 'active' : ''}`}
+                  onClick={() => { setSelectedNav('trash'); setActiveFolderId(null); }}
+                >
+                  <Trash2 size={18} />
+                  <span>Trash</span>
+                </button>
+
+                <button 
+                  className={`gdrive-nav-item ${selectedNav === 'storage' ? 'active' : ''}`}
+                  onClick={() => { setSelectedNav('storage'); setActiveFolderId(null); }}
+                >
+                  <Cloud size={18} />
+                  <span>Storage</span>
+                </button>
               </nav>
+
+              {/* Custom EduVault Storage Card */}
+              <div className="eduvault-storage-card">
+                <div className="storage-card-header">
+                  <div className="storage-card-icon-wrap">
+                    <Cloud size={16} />
+                  </div>
+                  <div className="storage-card-title-group">
+                    <span className="storage-card-label">Vault Storage</span>
+                    <span className="storage-card-plan">Institution Pro</span>
+                  </div>
+                  <span className="storage-card-percent">14%</span>
+                </div>
+
+                <div className="storage-card-meter-container">
+                  <div className="storage-meter-track">
+                    <div className="storage-meter-gradient-fill" style={{ width: '14.2%' }}></div>
+                  </div>
+                </div>
+
+                <div className="storage-stats-row">
+                  <span className="storage-stat-main">14.2 GB of 100 GB used</span>
+                  <span className="storage-stat-sub">85.8 GB free</span>
+                </div>
+
+                <button 
+                  className="eduvault-upgrade-storage-btn" 
+                  onClick={() => showToast("EduVault Academic Cloud: 100 GB Tier Active", "info")}
+                >
+                  <Sparkles size={14} className="upgrade-sparkle-icon" />
+                  <span>Get more storage</span>
+                </button>
+              </div>
             </aside>
 
             {/* Main Content Area */}
           <main className="gdrive-main-pane">
               {/* Workspace Top Search & Filter Bar */}
-              <div className="gdrive-top-bar" style={{ padding: '12px 24px', backgroundColor: 'transparent', borderBottom: '1px solid var(--ev-divider)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div className="gdrive-top-bar" style={{ padding: '12px 24px', backgroundColor: '#fff', borderBottom: '1px solid #dadce0', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ flex: 1, maxWidth: '720px' }}>
-                  <GlobalSearch userProfile={userProfile} onNavigate={() => {}} />
+                  <GlobalSearch userProfile={userProfile} onNavigate={handleSearchNavigate} />
                 </div>
               </div>
 
-              {/* Custom Filter Toolbar — only shown on legacy Drive views */}
-              {['shared','recent','starred','trash','storage','my-vault'].includes(selectedNav) && (
+              {/* Custom Filter Toolbar */}
                 <div className="gdrive-filter-chips">
                   <button 
                     className="create-filter-btn"
@@ -1378,7 +1494,6 @@ function App() {
                     </button>
                   )}
                 </div>
-              )}
 
               {/* Main Content White Board / Canvas */}
               {selectedNav === 'admin-academic' ? (
@@ -1388,208 +1503,6 @@ function App() {
               ) : selectedNav === 'classes' && (userProfile?.role === 'TEACHER' || userProfile?.role === 'STUDENT') ? (
                 <div className="gdrive-content-canvas" style={{ padding: 0, overflow: 'hidden' }}>
                   <MySubjects userProfile={userProfile} activeSubject={activeSubject} setActiveSubject={setActiveSubject} />
-                </div>
-              ) : selectedNav === 'classes' && userProfile?.role === 'ADMIN' ? (
-                <div className="gdrive-content-canvas" style={{ padding: '40px' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', minHeight: '300px', textAlign: 'center', gap: '16px' }}>
-                    <School size={48} style={{ color: 'var(--ev-text-secondary)', opacity: 0.4 }} />
-                    <h2 style={{ color: 'var(--ev-text)', fontSize: '1.3rem', fontWeight: 600 }}>My Subjects</h2>
-                    <p style={{ color: 'var(--ev-text-secondary)', maxWidth: '400px', lineHeight: 1.6 }}>
-                      As an administrator, you manage subjects through <strong>Academic Structure</strong>. Teachers and students see their assigned subjects here.
-                    </p>
-                    <button className="btn btn-secondary" onClick={() => setSelectedNav('admin-academic')}>
-                      <Settings size={16} /> <span>Go to Academic Structure</span>
-                    </button>
-                  </div>
-                </div>
-              ) : selectedNav === 'notices' ? (
-                <div className="gdrive-content-canvas" style={{ padding: 0, overflow: 'hidden' }}>
-                  <Notices userProfile={userProfile} />
-                </div>
-              ) : selectedNav === 'home' ? (
-                <div className="gdrive-content-canvas" style={{ padding: '40px', overflowY: 'auto' }}>
-                  {/* Role-aware greeting */}
-                  <h1 style={{ marginBottom: '4px', fontSize: '1.75rem', fontWeight: 700, color: 'var(--ev-text)' }}>
-                    Welcome back, {userProfile?.full_name?.split(' ')[0] || 'there'}
-                  </h1>
-                  <p style={{ color: 'var(--ev-text-secondary)', marginBottom: '8px', fontSize: '0.95rem' }}>
-                    {institutionName
-                      ? <><strong style={{ color: 'var(--ev-text)' }}>{institutionName}</strong> &mdash; {userProfile?.role}</>
-                      : <span style={{ fontStyle: 'italic' }}>Institution loading&hellip;</span>}
-                  </p>
-
-                  {/* Real summary stats — ADMIN only; only rendered when data is available */}
-                  {userProfile?.role === 'ADMIN' && homeStats && (
-                    <div style={{
-                      display: 'flex', flexWrap: 'wrap', gap: '12px',
-                      marginBottom: '36px', marginTop: '20px'
-                    }}>
-                      {[
-                        { label: 'Academic Years', value: homeStats.years,    nav: 'admin-academic' },
-                        { label: 'Programs',        value: homeStats.programs, nav: 'admin-academic' },
-                        { label: 'Subjects',         value: homeStats.subjects, nav: 'admin-academic' },
-                        { label: 'Documents',        value: homeStats.docs,    nav: 'my-vault' },
-                        { label: 'Notices',          value: homeStats.notices, nav: 'notices' },
-                      ].map(({ label, value, nav }) => (
-                        <div
-                          key={label}
-                          onClick={() => setSelectedNav(nav)}
-                          style={{
-                            cursor: 'pointer',
-                            padding: '14px 20px',
-                            borderRadius: '10px',
-                            border: '1px solid var(--ev-border)',
-                            background: 'var(--ev-surface-elevated)',
-                            minWidth: '110px',
-                            transition: 'border-color 0.2s',
-                          }}
-                          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                        >
-                          <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--ev-text)', lineHeight: 1 }}>
-                            {value === null ? '—' : value}
-                          </div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--ev-text-secondary)', marginTop: '4px' }}>
-                            {label}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Teacher stats */}
-                  {userProfile?.role === 'TEACHER' && homeStats && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '36px', marginTop: '20px' }}>
-                      {[
-                        { label: 'Assigned Subjects', value: homeStats.assignments, nav: 'classes' },
-                        { label: 'Documents',          value: homeStats.docs,        nav: 'my-vault' },
-                        { label: 'Notices',            value: homeStats.notices,     nav: 'notices' },
-                      ].map(({ label, value, nav }) => (
-                        <div key={label} onClick={() => setSelectedNav(nav)}
-                          style={{ cursor: 'pointer', padding: '14px 20px', borderRadius: '10px', border: '1px solid var(--ev-border)', background: 'var(--ev-surface-elevated)', minWidth: '110px', transition: 'border-color 0.2s' }}
-                          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                        >
-                          <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--ev-text)', lineHeight: 1 }}>{value === null ? '—' : value}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--ev-text-secondary)', marginTop: '4px' }}>{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Student stats */}
-                  {userProfile?.role === 'STUDENT' && homeStats && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', marginBottom: '36px', marginTop: '20px' }}>
-                      {[
-                        { label: 'Enrolled Subjects', value: homeStats.enrollments, nav: 'classes' },
-                        { label: 'Documents',          value: homeStats.docs,        nav: 'my-vault' },
-                        { label: 'Notices',            value: homeStats.notices,     nav: 'notices' },
-                      ].map(({ label, value, nav }) => (
-                        <div key={label} onClick={() => setSelectedNav(nav)}
-                          style={{ cursor: 'pointer', padding: '14px 20px', borderRadius: '10px', border: '1px solid var(--ev-border)', background: 'var(--ev-surface-elevated)', minWidth: '110px', transition: 'border-color 0.2s' }}
-                          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                        >
-                          <div style={{ fontSize: '1.6rem', fontWeight: 700, color: 'var(--ev-text)', lineHeight: 1 }}>{value === null ? '—' : value}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--ev-text-secondary)', marginTop: '4px' }}>{label}</div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Empty-state guidance for fresh Admin installation */}
-                  {userProfile?.role === 'ADMIN' && homeStats && homeStats.years === 0 && (
-                    <div style={{
-                      padding: '20px 24px',
-                      borderRadius: '10px',
-                      border: '1px dashed var(--ev-border)',
-                      background: 'var(--ev-surface)',
-                      marginBottom: '32px',
-                      maxWidth: '560px'
-                    }}>
-                      <p style={{ margin: 0, color: 'var(--ev-text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>
-                        <strong style={{ color: 'var(--ev-text)' }}>Getting started:</strong> No academic years have been configured yet.
-                        Begin by setting up your academic structure &mdash; add an academic year, programs, terms, and subjects.
-                      </p>
-                      <button
-                        className="btn btn-primary"
-                        style={{ marginTop: '14px', fontSize: '0.875rem' }}
-                        onClick={() => setSelectedNav('admin-academic')}
-                      >
-                        <Settings size={15} /> <span>Set up Academic Structure</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* Quick-action nav cards */}
-                  <div style={{
-                    display: 'grid',
-                    gap: '16px',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
-                    maxWidth: '900px'
-                  }}>
-                    {userProfile?.role === 'ADMIN' && (
-                      <div
-                        onClick={() => setSelectedNav('admin-academic')}
-                        style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
-                        onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                        onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                      >
-                        <Settings size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
-                        <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>Academic Structure</h3>
-                        <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
-                          Manage years, programs, terms, and subjects.
-                        </p>
-                      </div>
-                    )}
-
-                    <div
-                      onClick={() => setSelectedNav('classes')}
-                      style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                    >
-                      <School size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
-                      <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>My Subjects</h3>
-                      <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
-                        {userProfile?.role === 'ADMIN'
-                          ? 'Overview of subjects in your institution.'
-                          : userProfile?.role === 'TEACHER'
-                          ? 'Your assigned subjects and their materials.'
-                          : 'Your enrolled subjects and available materials.'}
-                      </p>
-                    </div>
-
-                    <div
-                      onClick={() => setSelectedNav('my-vault')}
-                      style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-teal)'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                    >
-                      <HardDrive size={22} style={{ color: 'var(--ev-teal)', marginBottom: '12px' }} />
-                      <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>Materials</h3>
-                      <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
-                        {homeStats?.docs === 0
-                          ? 'No materials uploaded yet. Upload your first document.'
-                          : 'Browse, upload, and manage academic documents.'}
-                      </p>
-                    </div>
-
-                    <div
-                      onClick={() => setSelectedNav('notices')}
-                      style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
-                      onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                      onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                    >
-                      <Bell size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
-                      <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>Notices</h3>
-                      <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
-                        {homeStats?.notices === 0
-                          ? 'No notices posted yet.'
-                          : 'View and manage institutional notices.'}
-                      </p>
-                    </div>
-                  </div>
                 </div>
               ) : (
               <div className="gdrive-content-canvas">

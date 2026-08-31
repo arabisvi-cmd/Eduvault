@@ -1,0 +1,138 @@
+import React, { useState, useEffect } from 'react';
+import { supabase } from './lib/supabase';
+import { BookOpen } from 'lucide-react';
+import SubjectVault from './SubjectVault';
+import Notices from './Notices';
+
+export default function MySubjects({ userProfile }) {
+  const [subjects, setSubjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeSubject, setActiveSubject] = useState(null);
+
+  useEffect(() => {
+    if (userProfile?.id && userProfile?.role) {
+      fetchMySubjects();
+    }
+  }, [userProfile]);
+
+  async function fetchMySubjects() {
+    setLoading(true);
+    let data = [];
+    if (userProfile.role === 'TEACHER') {
+      const { data: assignments } = await supabase
+        .from('teacher_assignments')
+        .select(`
+          subject:subjects(
+            id, name, code,
+            term:terms(name, program:programs(name, academic_year:academic_years(name))),
+            documents(id, status)
+          )
+        `)
+        .eq('user_id', userProfile.id);
+      if (assignments) data = assignments.map(a => a.subject).filter(Boolean);
+    } else if (userProfile.role === 'STUDENT') {
+      const { data: enrollments } = await supabase
+        .from('student_enrollments')
+        .select(`
+          subject:subjects(
+            id, name, code,
+            term:terms(name, program:programs(name, academic_year:academic_years(name))),
+            documents(id)
+          )
+        `)
+        .eq('user_id', userProfile.id);
+      if (enrollments) data = enrollments.map(e => e.subject).filter(Boolean);
+    }
+    setSubjects(data);
+    setLoading(false);
+  }
+
+  if (loading) {
+    return <div style={{ padding: '20px', color: '#5f6368' }}>Loading subjects...</div>;
+  }
+
+  if (activeSubject) {
+    return <SubjectVault subject={activeSubject} userProfile={userProfile} onBack={() => setActiveSubject(null)} />;
+  }
+
+  const renderStudentOverview = () => {
+    if (userProfile.role !== 'STUDENT' || subjects.length === 0) return null;
+    const firstSubj = subjects[0];
+    if (!firstSubj?.term) return null;
+    
+    return (
+      <div style={{ marginBottom: '20px', padding: '15px', backgroundColor: '#e8f0fe', borderRadius: '8px', color: '#1a73e8', display: 'flex', gap: '15px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ fontWeight: 500 }}>Institution: <span style={{ fontWeight: 400 }}>{userProfile.institution_id}</span></div>
+        <span>•</span>
+        <div style={{ fontWeight: 500 }}>Academic Year: <span style={{ fontWeight: 400 }}>{firstSubj.term?.program?.academic_year?.name || 'N/A'}</span></div>
+        <span>•</span>
+        <div style={{ fontWeight: 500 }}>Program: <span style={{ fontWeight: 400 }}>{firstSubj.term?.program?.name || 'N/A'}</span></div>
+        <span>•</span>
+        <div style={{ fontWeight: 500 }}>Term/Semester: <span style={{ fontWeight: 400 }}>{firstSubj.term?.name || 'N/A'}</span></div>
+      </div>
+    );
+  };
+
+  return (
+    <div style={{ padding: '20px', color: '#202124', height: '100%', overflowY: 'auto' }}>
+      <h2 style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '20px', fontSize: '1.5rem', fontWeight: 500 }}>
+        <BookOpen size={24} style={{ color: '#1a73e8' }} /> {userProfile.role === 'STUDENT' ? 'Student Workspace' : 'My Subjects'}
+      </h2>
+
+      {renderStudentOverview()}
+
+      <Notices userProfile={userProfile} />
+      
+      {subjects.length === 0 ? (
+        <div style={{ padding: '30px', textAlign: 'center', backgroundColor: '#f8f9fa', borderRadius: '8px', color: '#5f6368' }}>
+          {userProfile.role === 'TEACHER' ? "You are not assigned to any subjects yet." : "You are not enrolled in any subjects yet."}
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: '20px' }}>
+          {subjects.map(subject => (
+            <div key={subject.id} style={{ 
+              backgroundColor: '#fff', 
+              border: '1px solid #dadce0', 
+              borderRadius: '8px', 
+              padding: '20px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '10px',
+              cursor: 'pointer',
+              transition: 'box-shadow 0.2s',
+              boxShadow: '0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15)'
+            }}
+            onClick={() => setActiveSubject(subject)}
+            onMouseOver={e => e.currentTarget.style.boxShadow = '0 1px 3px 0 rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15)'}
+            onMouseOut={e => e.currentTarget.style.boxShadow = '0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15)'}
+            >
+              <div style={{ fontWeight: 500, fontSize: '1.1rem', color: '#202124' }}>{subject.name}</div>
+              {subject.code && <div style={{ fontSize: '0.85rem', color: '#5f6368', padding: '2px 6px', backgroundColor: '#f1f3f4', borderRadius: '4px', alignSelf: 'flex-start' }}>{subject.code}</div>}
+              
+              <div style={{ marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid #f1f3f4', fontSize: '0.85rem', color: '#5f6368', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                {userProfile.role === 'TEACHER' ? (
+                  <>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Total Documents:</span>
+                      <span style={{ fontWeight: 500, color: '#202124' }}>{subject.documents?.length || 0}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Published:</span>
+                      <span style={{ fontWeight: 500, color: '#188038' }}>{subject.documents?.filter(d => d.status === 'PUBLISHED').length || 0}</span>
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                      <span>Drafts:</span>
+                      <span style={{ fontWeight: 500, color: '#f29900' }}>{subject.documents?.filter(d => d.status === 'DRAFT').length || 0}</span>
+                    </div>
+                  </>
+                ) : (
+                  <div>{subject.documents ? subject.documents.length : 0} published material{subject.documents?.length === 1 ? '' : 's'}</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
