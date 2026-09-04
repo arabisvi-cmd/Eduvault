@@ -1011,21 +1011,54 @@ export default function AdminPeopleHub({ userProfile }) {
           }}
           columns={[
             {
-              key: 'faculty',
-              header: 'Faculty Member',
+              key: 'teacher',
+              header: 'Teacher Name',
               render: (row) => (
                 <div>
-                  <div style={{ fontWeight: 600 }}>{row.user?.full_name || 'Faculty'}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--ev-text-secondary)' }}>{row.user?.email}</div>
+                  <div style={{ fontWeight: 600, color: 'var(--ev-text)' }}>
+                    {row.user?.full_name || 'Faculty Member'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--ev-text-secondary)' }}>
+                    {row.user?.email || '—'}
+                  </div>
                 </div>
               )
             },
             {
+              key: 'academic_year',
+              header: 'Academic Year',
+              render: (row) => (
+                <span style={{ fontWeight: 500, color: 'var(--ev-text)' }}>
+                  {row.subject?.term?.program?.academic_year?.name || '—'}
+                </span>
+              )
+            },
+            {
+              key: 'program',
+              header: 'Program',
+              render: (row) => (
+                <span style={{ color: 'var(--ev-text)' }}>
+                  {row.subject?.term?.program?.name || '—'}
+                </span>
+              )
+            },
+            {
+              key: 'term',
+              header: 'Term',
+              render: (row) => (
+                <span style={{ color: 'var(--ev-text)' }}>
+                  {row.subject?.term?.name || '—'}
+                </span>
+              )
+            },
+            {
               key: 'subject',
-              header: 'Official Subject',
+              header: 'Subject',
               render: (row) => (
                 <div>
-                  <div style={{ fontWeight: 600, color: 'var(--ev-primary)' }}>{row.subject?.name}</div>
+                  <div style={{ fontWeight: 600, color: 'var(--ev-primary)' }}>
+                    {row.subject?.name || 'Subject'}
+                  </div>
                   {row.subject?.code && (
                     <div style={{ fontSize: '11px', color: 'var(--ev-text-secondary)' }}>
                       Code: {row.subject.code}
@@ -1035,24 +1068,17 @@ export default function AdminPeopleHub({ userProfile }) {
               )
             },
             {
-              key: 'context',
-              header: 'Academic Placement',
+              key: 'allocation',
+              header: 'Allocation Status',
               render: (row) => (
                 <div>
-                  <div style={{ fontWeight: 500 }}>{row.subject?.term?.name || '—'}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--ev-text-secondary)' }}>
-                    {row.subject?.term?.program?.name} • {row.subject?.term?.program?.academic_year?.name}
-                  </div>
+                  <Badge status="active">Active Assignment</Badge>
+                  {row.created_at && (
+                    <div style={{ fontSize: '11px', color: 'var(--ev-text-secondary)', marginTop: '3px' }}>
+                      Assigned {new Date(row.created_at).toLocaleDateString()}
+                    </div>
+                  )}
                 </div>
-              )
-            },
-            {
-              key: 'date',
-              header: 'Assigned Date',
-              render: (row) => (
-                <span style={{ color: 'var(--ev-text-secondary)' }}>
-                  {row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}
-                </span>
               )
             },
             {
@@ -1070,7 +1096,7 @@ export default function AdminPeopleHub({ userProfile }) {
                       type: 'assignment',
                       id: row.id,
                       title: 'Teacher Assignment',
-                      personName: row.user?.full_name || 'Faculty',
+                      personName: row.user?.full_name || 'Faculty Member',
                       subjectName: row.subject?.name || 'Subject'
                     });
                     setActiveModal('delete-confirm');
@@ -1096,20 +1122,53 @@ export default function AdminPeopleHub({ userProfile }) {
           columns={[
             {
               key: 'student',
-              header: 'Scholar / Student',
+              header: 'Student Name',
               render: (row) => (
                 <div>
-                  <div style={{ fontWeight: 600 }}>{row.user?.full_name || 'Student'}</div>
-                  <div style={{ fontSize: '12px', color: 'var(--ev-text-secondary)' }}>{row.user?.email}</div>
+                  <div style={{ fontWeight: 600, color: 'var(--ev-text)' }}>
+                    {row.user?.full_name || 'Student'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--ev-text-secondary)' }}>
+                    {row.user?.email || '—'}
+                  </div>
                 </div>
               )
             },
             {
+              key: 'academic_year',
+              header: 'Academic Year',
+              render: (row) => (
+                <span style={{ fontWeight: 500, color: 'var(--ev-text)' }}>
+                  {row.subject?.term?.program?.academic_year?.name || '—'}
+                </span>
+              )
+            },
+            {
+              key: 'program',
+              header: 'Program',
+              render: (row) => (
+                <span style={{ color: 'var(--ev-text)' }}>
+                  {row.subject?.term?.program?.name || '—'}
+                </span>
+              )
+            },
+            {
+              key: 'term',
+              header: 'Term',
+              render: (row) => (
+                <span style={{ color: 'var(--ev-text)' }}>
+                  {row.subject?.term?.name || '—'}
+                </span>
+              )
+            },
+            {
               key: 'subject',
-              header: 'Official Subject',
+              header: 'Subject',
               render: (row) => (
                 <div>
-                  <div style={{ fontWeight: 600, color: 'var(--ev-primary)' }}>{row.subject?.name}</div>
+                  <div style={{ fontWeight: 600, color: 'var(--ev-primary)' }}>
+                    {row.subject?.name || 'Subject'}
+                  </div>
                   {row.subject?.code && (
                     <div style={{ fontSize: '11px', color: 'var(--ev-text-secondary)' }}>
                       Code: {row.subject.code}
@@ -1119,24 +1178,17 @@ export default function AdminPeopleHub({ userProfile }) {
               )
             },
             {
-              key: 'context',
-              header: 'Academic Placement',
+              key: 'status',
+              header: 'Enrollment Status',
               render: (row) => (
                 <div>
-                  <div style={{ fontWeight: 500 }}>{row.subject?.term?.name || '—'}</div>
-                  <div style={{ fontSize: '11px', color: 'var(--ev-text-secondary)' }}>
-                    {row.subject?.term?.program?.name} • {row.subject?.term?.program?.academic_year?.name}
-                  </div>
+                  <Badge status="active">Enrolled</Badge>
+                  {row.created_at && (
+                    <div style={{ fontSize: '11px', color: 'var(--ev-text-secondary)', marginTop: '3px' }}>
+                      Enrolled {new Date(row.created_at).toLocaleDateString()}
+                    </div>
+                  )}
                 </div>
-              )
-            },
-            {
-              key: 'date',
-              header: 'Enrollment Date',
-              render: (row) => (
-                <span style={{ color: 'var(--ev-text-secondary)' }}>
-                  {row.created_at ? new Date(row.created_at).toLocaleDateString() : '—'}
-                </span>
               )
             },
             {
@@ -1172,23 +1224,7 @@ export default function AdminPeopleHub({ userProfile }) {
     <div style={{ padding: '0', maxWidth: '1200px', margin: '0 auto' }}>
       {/* Toast Notification */}
       {toast && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 10000,
-          background: toast.type === 'error' ? '#DC2626' : 'var(--ev-primary)',
-          color: '#FFFFFF',
-          padding: '12px 20px',
-          borderRadius: '8px',
-          boxShadow: 'var(--ev-shadow-lg)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          fontSize: '13px',
-          fontWeight: 500,
-          animation: 'ev-modal-enter 0.2s ease-out'
-        }}>
+        <div className={`ev-toast-banner ${toast.type === 'error' ? 'error' : 'success'}`}>
           <CheckCircle size={16} />
           <span>{toast.message}</span>
         </div>

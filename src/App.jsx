@@ -8,7 +8,7 @@ import {
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, Sparkles, X, Check,
   Share2, FolderInput, Copy, Pencil, ExternalLink, Settings, Bell, LogOut,
-  Sun, Moon, CircleDot
+  Sun, CircleDot, Eye, EyeOff
 } from 'lucide-react';
 import AdminAcademicManager from './AdminAcademicManager';
 import AdminPeopleHub from './components/admin/AdminPeopleHub';
@@ -351,8 +351,12 @@ function App() {
   const [searchQuery, setSearchQuery] = useState("");
   
   const getInitialView = () => {
-    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-    if (['login', 'signup', 'workspace'].includes(hash)) {
+    const rawHash = window.location.hash;
+    if (rawHash.includes('type=recovery') || rawHash.includes('type=invite')) {
+      return 'set-password';
+    }
+    const hash = rawHash.replace(/^#\/?/, '').toLowerCase();
+    if (['login', 'signup', 'workspace', 'set-password', 'reset-password'].includes(hash)) {
       return hash;
     }
     return 'home';
@@ -374,9 +378,11 @@ function App() {
   useEffect(() => {
     if (currentView === 'home') {
       const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (['login', 'signup', 'workspace'].includes(hash)) {
+      if (['login', 'signup', 'workspace', 'set-password', 'reset-password'].includes(hash)) {
         history.replaceState(null, '', window.location.pathname + window.location.search);
       }
+    } else if (currentView === 'set-password' && window.location.hash.includes('access_token')) {
+      // Retain token hash so Supabase auth listener parses it
     } else {
       window.location.hash = currentView;
     }
@@ -385,14 +391,25 @@ function App() {
   // Handle browser back/forward buttons
   useEffect(() => {
     const handleHashChange = () => {
-      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-      if (['home', 'login', 'signup', 'workspace'].includes(hash)) {
+      const rawHash = window.location.hash;
+      if (rawHash.includes('type=recovery') || rawHash.includes('type=invite')) {
+        setCurrentView('set-password');
+        return;
+      }
+      const hash = rawHash.replace(/^#\/?/, '').toLowerCase();
+      if (currentUser && (hash === 'login' || hash === 'signup')) {
+        // Authenticated users remain inside the workspace on browser back navigation
+        history.replaceState(null, '', '#workspace');
+        setCurrentView('workspace');
+        return;
+      }
+      if (['home', 'login', 'signup', 'workspace', 'set-password', 'reset-password'].includes(hash)) {
         setCurrentView(hash);
       }
     };
     window.addEventListener('hashchange', handleHashChange);
     return () => window.removeEventListener('hashchange', handleHashChange);
-  }, []);
+  }, [currentUser]);
 
   // Close account menu on outside click
   useEffect(() => {
@@ -430,8 +447,19 @@ function App() {
   // Form states
   const [emailInput, setEmailInput] = useState("");
   const [passwordInput, setPasswordInput] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [nameInput, setNameInput] = useState("");
-  const [institutionInput, setInstitutionInput] = useState("inst-1");
+  const [institutionInput, setInstitutionInput] = useState("");
+
+  // Onboarding & Password Setup/Reset states
+  const [newPasswordInput, setNewPasswordInput] = useState("");
+  const [confirmPasswordInput, setConfirmPasswordInput] = useState("");
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isSettingPassword, setIsSettingPassword] = useState(false);
+  const [resetEmailInput, setResetEmailInput] = useState("");
+  const [isResettingPassword, setIsResettingPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
 
   // Toast System
   const [toast, setToast] = useState({ show: false, message: "", icon: "info" });
@@ -468,14 +496,11 @@ function App() {
   const [renameFolderInputVal, setRenameFolderInputVal] = useState("");
   const [sharingFolder, setSharingFolder] = useState(null);
 
-  // 3-Mode Theme System (Light, Dark, AMOLED)
+  // 2-Mode Theme System (Light | AMOLED)
   const getInitialAppearance = () => {
     const saved = localStorage.getItem('eduvault-appearance');
-    if (saved && ['light', 'dark', 'amoled'].includes(saved)) {
-      return saved;
-    }
-    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
+    if (saved === 'amoled') {
+      return 'amoled';
     }
     return 'light';
   };
@@ -528,56 +553,70 @@ function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  const loadProfile = async (userId) => {
+    if (!isSupabaseConfigured || !supabase || !userId) return;
+    try {
+      const { data, error } = await supabase.from('users').select('*').eq('id', userId).single();
+      if (error) {
+        console.error("Profile error:", error);
+        setUserProfile(null);
+      } else {
+        setUserProfile(data);
+      }
+    } catch (err) {
+      console.error("Profile exception:", err);
+      setUserProfile(null);
+    } finally {
+      setIsAuthLoading(false);
+    }
+  };
+
   // Supabase Auth & Document Fetching
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
 
-    const loadProfile = async (userId) => {
-      try {
-        const { data, error } = await supabase.from('users').select('*').eq('id', userId).single();
-        if (error) {
-          console.error("Profile error:", error);
-          setUserProfile(null);
-        } else {
-          setUserProfile(data);
-        }
-      } catch (err) {
-        console.error(err);
-      } finally {
-        setIsAuthLoading(false);
-      }
-    };
-
     // Check existing auth session
     supabase.auth.getSession().then(({ data: { session } }) => {
+      const rawHash = window.location.hash;
+      const isRecovery = rawHash.includes('type=recovery') || rawHash.includes('type=invite');
+
       if (session?.user) {
         setCurrentUser(session.user);
         loadProfile(session.user.id);
-        const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
-        if (hash === 'home') {
-          setCurrentView('home');
+        if (isRecovery) {
+          setCurrentView('set-password');
         } else {
-          setCurrentView('workspace');
+          const hash = rawHash.replace(/^#\/?/, '').toLowerCase();
+          if (hash === 'home') {
+            setCurrentView('home');
+          } else {
+            setCurrentView('workspace');
+          }
         }
       } else {
         setCurrentUser(null);
         setUserProfile(null);
         setIsAuthLoading(false);
-        // NO SESSION: Workspace is NOT allowed. If currentView is workspace, redirect to login.
-        // If currentView is home, login, or signup, keep it!
-        setCurrentView(prev => (prev === 'workspace' ? 'login' : prev));
+        if (!isRecovery) {
+          setCurrentView(prev => (prev === 'workspace' ? 'login' : prev));
+        }
       }
     });
 
     // Listen for auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      const rawHash = window.location.hash;
+      const isRecovery = _event === 'PASSWORD_RECOVERY' || rawHash.includes('type=recovery') || rawHash.includes('type=invite');
+
       if (session?.user) {
         setCurrentUser(session.user);
         loadProfile(session.user.id);
-        if (_event === 'SIGNED_IN') {
+        if (isRecovery) {
+          setCurrentView('set-password');
+        } else if (_event === 'SIGNED_IN') {
           setCurrentView('workspace');
         } else if (_event === 'INITIAL_SESSION') {
-          const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+          const hash = rawHash.replace(/^#\/?/, '').toLowerCase();
           if (hash !== 'home') {
             setCurrentView('workspace');
           }
@@ -588,7 +627,7 @@ function App() {
         setIsAuthLoading(false);
         if (_event === 'SIGNED_OUT') {
           setCurrentView('login');
-        } else {
+        } else if (!isRecovery) {
           setCurrentView(prev => (prev === 'workspace' ? 'login' : prev));
         }
       }
@@ -926,21 +965,33 @@ function App() {
       showToast("Please fill in all required fields", "info");
       return;
     }
+    if (currentView === "signup" && !institutionInput) {
+      showToast("Please select an institution", "info");
+      return;
+    }
 
     if (isSupabaseConfigured && supabase) {
       try {
         if (currentView === "login") {
           const { data, error } = await supabase.auth.signInWithPassword({
-            email: emailInput,
+            email: emailInput.trim(),
             password: passwordInput
           });
           if (error) {
-            showToast(error.message, "info");
+            const msg = (error.message || "").toLowerCase();
+            if (msg.includes("invalid login credentials") || msg.includes("invalid_grant")) {
+              showToast("Invalid email or password. If this is your first time or you were recently invited, click 'First time signing in or forgot password?' below to set your password.", "info");
+            } else if (msg.includes("email not confirmed")) {
+              showToast("Email address not confirmed. Please check your inbox for the activation link.", "info");
+            } else {
+              showToast(error.message, "info");
+            }
             return;
           }
           showToast(`Welcome back!`, "check-circle");
+          window.history.replaceState(null, '', '#workspace');
         } else {
-          showToast("Public registration is disabled. Contact your administrator.", "info");
+          showToast("Public registration is disabled. Please contact your institutional administrator to be provisioned.", "info");
           return;
         }
       } catch (err) {
@@ -956,6 +1007,82 @@ function App() {
     setPasswordInput("");
     setNameInput("");
     setCurrentView("workspace");
+  };
+
+  const handleSetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!newPasswordInput || !confirmPasswordInput) {
+      showToast("Please fill in and confirm your new password", "info");
+      return;
+    }
+    if (newPasswordInput.length < 8) {
+      showToast("Password must be at least 8 characters long", "info");
+      return;
+    }
+    if (newPasswordInput !== confirmPasswordInput) {
+      showToast("Passwords do not match", "info");
+      return;
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      showToast("Supabase is not configured.", "info");
+      return;
+    }
+
+    setIsSettingPassword(true);
+    try {
+      const { data, error } = await supabase.auth.updateUser({
+        password: newPasswordInput
+      });
+      if (error) {
+        showToast(error.message || "Failed to set password", "info");
+        return;
+      }
+      showToast("Password established successfully! Welcome to EduVault.", "check-circle");
+      setNewPasswordInput("");
+      setConfirmPasswordInput("");
+      history.replaceState(null, '', window.location.pathname);
+      if (data?.user) {
+        setCurrentUser(data.user);
+        await loadProfile(data.user.id);
+      }
+      setCurrentView("workspace");
+    } catch (err) {
+      showToast(err.message || "Error updating password", "info");
+    } finally {
+      setIsSettingPassword(false);
+    }
+  };
+
+  const handleResetPasswordSubmit = async (e) => {
+    e.preventDefault();
+    if (!resetEmailInput.trim()) {
+      showToast("Please enter your registered email address", "info");
+      return;
+    }
+
+    if (!isSupabaseConfigured || !supabase) {
+      showToast("Supabase is not configured.", "info");
+      return;
+    }
+
+    setIsResettingPassword(true);
+    try {
+      const redirectTo = `${window.location.origin}/#type=recovery`;
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmailInput.trim(), {
+        redirectTo
+      });
+      if (error && error.status === 429) {
+        showToast("Rate limit exceeded. Please wait a few minutes before trying again.", "info");
+        return;
+      }
+      setResetSent(true);
+      showToast("If registered, a password setup link has been dispatched to your email.", "check-circle");
+    } catch (err) {
+      showToast(err.message || "Error sending password setup link", "info");
+    } finally {
+      setIsResettingPassword(false);
+    }
   };
 
   const handleLogout = () => {
@@ -1141,7 +1268,7 @@ function App() {
           )}
 
           <div className="header-actions">
-            {/* 3-Mode Icon Theme Switcher */}
+            {/* 2-Mode Icon Theme Switcher (Light | AMOLED) */}
             <div className="theme-switcher" role="group" aria-label="Color theme switcher">
               <button
                 type="button"
@@ -1152,16 +1279,6 @@ function App() {
                 title="Switch to Light mode"
               >
                 <Sun size={15} />
-              </button>
-              <button
-                type="button"
-                className={`theme-btn ${appearance === 'dark' ? 'active' : ''}`}
-                onClick={() => setAppearance('dark')}
-                aria-label="Switch to Dark mode"
-                aria-pressed={appearance === 'dark'}
-                title="Switch to Dark mode"
-              >
-                <Moon size={15} />
               </button>
               <button
                 type="button"
@@ -1251,7 +1368,7 @@ function App() {
                           <div className="item-text-group">
                             <span className="item-label">Institution Scope</span>
                             <span className="item-value">
-                              {institutionName || userProfile?.institution_id || 'EduVault Primary'}
+                              {institutionName || 'EduVault Institution'}
                             </span>
                           </div>
                         </div>
@@ -1415,12 +1532,28 @@ function App() {
             <div className="auth-loading-state" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh', color: 'var(--ev-text)' }}>
               <h2>Loading Workspace...</h2>
             </div>
-          ) : (!currentUser || !userProfile) ? (
+          ) : !currentUser ? (
             <div className="auth-error-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', color: 'var(--ev-text)' }}>
-              <h2>Access Denied</h2>
-              <p>You must log in to access the workspace.</p>
+              <h2>Authentication Required</h2>
+              <p style={{ color: 'var(--ev-text-secondary)', marginTop: '8px' }}>You must log in to access the workspace.</p>
               <br/>
               <button className="btn btn-primary" onClick={() => setCurrentView('login')}>Go to Login</button>
+            </div>
+          ) : !userProfile ? (
+            <div className="auth-error-state" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '80vh', color: 'var(--ev-text)', textAlign: 'center', padding: '0 20px' }}>
+              <h2>Institutional Profile Unavailable</h2>
+              <p style={{ color: 'var(--ev-text-secondary)', maxWidth: '460px', marginTop: '8px', lineHeight: '1.5' }}>
+                Your account ({currentUser.email}) is authenticated, but no institutional user profile was found in EduVault.
+                Please contact your institution administrator to complete your user provisioning.
+              </p>
+              <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+                <button className="btn btn-secondary" onClick={() => { setIsAuthLoading(true); loadProfile(currentUser.id); }}>
+                  Retry
+                </button>
+                <button className="btn btn-primary" onClick={handleLogout}>
+                  Sign Out
+                </button>
+              </div>
             </div>
           ) : (
           /* ==========================================================================
@@ -1436,8 +1569,8 @@ function App() {
                 </div>
                 <div style={{ fontSize: '0.75rem', color: 'var(--ev-text-secondary)', marginTop: '2px' }}>
                   {userProfile?.role}
-                  {userProfile?.institution_id && (
-                    <span style={{ marginLeft: '6px', opacity: 0.7 }}>· {userProfile.institution_id.slice(0, 8)}…</span>
+                  {institutionName && (
+                    <span style={{ marginLeft: '6px', opacity: 0.8 }}>· {institutionName}</span>
                   )}
                 </div>
               </div>
@@ -2381,99 +2514,302 @@ function App() {
         ) : (
           /* Authentication Screen */
           <section className="auth-section">
-            <div className="auth-card">
-              <div className="auth-card-header">
-                <h2>{currentView === "login" ? "Welcome Back" : "Create Account"}</h2>
-                <p>
-                  {currentView === "login" 
-                    ? "Access your secure academic vault workspace" 
-                    : "Register your institution with EduVault"}
-                </p>
-              </div>
+            {currentView === "set-password" ? (
+              <div className="auth-card">
+                <div className="auth-card-header">
+                  <h2>Set Account Password</h2>
+                  <p>Establish a secure password for your EduVault account</p>
+                </div>
 
-              <form onSubmit={handleAuthSubmit} className="auth-form">
-                {currentView === "signup" && (
-                  <>
+                <form onSubmit={handleSetPasswordSubmit} className="auth-form">
+                  <div className="form-group">
+                    <label htmlFor="new-password">New Password (at least 8 characters)</label>
+                    <div className="input-wrapper">
+                      <Lock size={16} />
+                      <input 
+                        type={showNewPassword ? "text" : "password"} 
+                        id="new-password" 
+                        placeholder="••••••••" 
+                        value={newPasswordInput} 
+                        onChange={(e) => setNewPasswordInput(e.target.value)} 
+                        required
+                        minLength={8}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-btn"
+                        onClick={() => setShowNewPassword(!showNewPassword)}
+                        aria-label={showNewPassword ? "Hide password" : "Show password"}
+                        title={showNewPassword ? "Hide password" : "Show password"}
+                      >
+                        {showNewPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="confirm-password">Confirm Password</label>
+                    <div className="input-wrapper">
+                      <Lock size={16} />
+                      <input 
+                        type={showConfirmPassword ? "text" : "password"} 
+                        id="confirm-password" 
+                        placeholder="••••••••" 
+                        value={confirmPasswordInput} 
+                        onChange={(e) => setConfirmPasswordInput(e.target.value)} 
+                        required
+                        minLength={8}
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-btn"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                        title={showConfirmPassword ? "Hide password" : "Show password"}
+                      >
+                        {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button type="submit" className="btn btn-primary btn-block" disabled={isSettingPassword}>
+                    {isSettingPassword ? "Saving Password..." : "Save Password & Enter Workspace"}
+                  </button>
+                </form>
+
+                <div className="auth-card-footer">
+                  <p>
+                    <span onClick={() => setCurrentView("login")}>Back to Login</span>
+                  </p>
+                  <div style={{ marginTop: '12px' }}>
+                    <button 
+                      type="button" 
+                      onClick={() => setCurrentView("home")}
+                      className="btn btn-secondary btn-sm"
+                      style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    >
+                      <ArrowLeft size={14} />
+                      <span>Back to Home</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ) : currentView === "reset-password" ? (
+              <div className="auth-card">
+                <div className="auth-card-header">
+                  <h2>Password Setup / Reset</h2>
+                  <p>Request a secure link to establish or reset your account password</p>
+                </div>
+
+                {resetSent ? (
+                  <div style={{ textAlign: 'center', padding: '12px 0' }}>
+                    <div style={{ 
+                      padding: '16px', 
+                      borderRadius: '8px', 
+                      background: 'var(--ev-primary-light)', 
+                      color: 'var(--ev-text)',
+                      marginBottom: '20px',
+                      fontSize: '0.88rem',
+                      lineHeight: '1.5'
+                    }}>
+                      <p style={{ fontWeight: 600, color: 'var(--ev-primary)' }}>Instructions Dispatched</p>
+                      <p style={{ marginTop: '8px', color: 'var(--ev-text-secondary)' }}>
+                        If an account exists for <strong>{resetEmailInput}</strong>, a secure password setup link has been sent.
+                        Please check your inbox (including your spam/junk folder) and click the link to set your password.
+                      </p>
+                    </div>
+                    <button 
+                      type="button" 
+                      className="btn btn-primary btn-block"
+                      onClick={() => { setCurrentView("login"); setResetSent(false); setResetEmailInput(""); }}
+                    >
+                      Return to Log In
+                    </button>
+                  </div>
+                ) : (
+                  <form onSubmit={handleResetPasswordSubmit} className="auth-form">
                     <div className="form-group">
-                      <label htmlFor="fullname">Full Name</label>
+                      <label htmlFor="reset-email">Registered Email Address</label>
                       <div className="input-wrapper">
-                        <Users size={16} />
+                        <Mail size={16} />
                         <input 
-                          type="text" 
-                          id="fullname" 
-                          placeholder="John Doe" 
-                          value={nameInput} 
-                          onChange={(e) => setNameInput(e.target.value)} 
+                          type="email" 
+                          id="reset-email" 
+                          placeholder="you@school.edu" 
+                          value={resetEmailInput} 
+                          onChange={(e) => setResetEmailInput(e.target.value)} 
                           required
                         />
                       </div>
                     </div>
-                    <div className="form-group">
-                      <label htmlFor="auth-institution">Institution</label>
-                      <div className="input-wrapper">
-                        <School size={16} />
-                        <select 
-                          id="auth-institution"
-                          value={institutionInput}
-                          onChange={(e) => setInstitutionInput(e.target.value)}
-                        >
-                          <option value="inst-1">St. Xavier High School</option>
-                          <option value="inst-2">Cambridge Global Academy</option>
-                        </select>
-                      </div>
-                    </div>
-                  </>
+
+                    <button type="submit" className="btn btn-primary btn-block" disabled={isResettingPassword}>
+                      {isResettingPassword ? "Sending Link..." : "Send Password Setup Link"}
+                    </button>
+                  </form>
                 )}
 
-                <div className="form-group">
-                  <label htmlFor="email">Email Address</label>
-                  <div className="input-wrapper">
-                    <Mail size={16} />
-                    <input 
-                      type="email" 
-                      id="email" 
-                      placeholder="you@school.edu" 
-                      value={emailInput} 
-                      onChange={(e) => setEmailInput(e.target.value)} 
-                      required
-                    />
+                <div className="auth-card-footer">
+                  <p>
+                    Remember your password?{' '}
+                    <span onClick={() => { setCurrentView("login"); setResetSent(false); }}>Log in instead</span>
+                  </p>
+                  <div style={{ marginTop: '12px' }}>
+                    <button 
+                      type="button" 
+                      onClick={() => setCurrentView("home")}
+                      className="btn btn-secondary btn-sm"
+                      style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    >
+                      <ArrowLeft size={14} />
+                      <span>Back to Home</span>
+                    </button>
                   </div>
                 </div>
-
-                <div className="form-group">
-                  <label htmlFor="password">Password</label>
-                  <div className="input-wrapper">
-                    <Lock size={16} />
-                    <input 
-                      type="password" 
-                      id="password" 
-                      placeholder="••••••••" 
-                      value={passwordInput} 
-                      onChange={(e) => setPasswordInput(e.target.value)} 
-                      required
-                    />
-                  </div>
-                </div>
-
-                <button type="submit" className="btn btn-primary btn-block">
-                  {currentView === "login" ? "Log In" : "Sign Up"}
-                </button>
-              </form>
-
-              <div className="auth-card-footer">
-                {currentView === "login" ? (
-                  <p>
-                    New to EduVault?{' '}
-                    <span onClick={() => { setCurrentView("signup"); setEmailInput(""); }}>Create an account</span>
-                  </p>
-                ) : (
-                  <p>
-                    Already have an account?{' '}
-                    <span onClick={() => { setCurrentView("login"); setEmailInput("arabisvi@gmail.com"); }}>Log in instead</span>
-                  </p>
-                )}
               </div>
-            </div>
+            ) : (
+              <div className="auth-card">
+                <div className="auth-card-header">
+                  <h2>{currentView === "login" ? "Welcome Back" : "Institutional Registration"}</h2>
+                  <p>
+                    {currentView === "login" 
+                      ? "Access your secure academic vault workspace" 
+                      : "Institutional platform onboarding"}
+                  </p>
+                </div>
+
+                {currentView === "signup" && (
+                  <div style={{ 
+                    margin: '0 0 1.25rem 0', 
+                    padding: '12px 16px', 
+                    background: 'var(--ev-primary-light)', 
+                    border: '1px solid var(--ev-border)', 
+                    borderRadius: '8px', 
+                    fontSize: '0.84rem', 
+                    color: 'var(--ev-text)',
+                    lineHeight: '1.4'
+                  }}>
+                    <strong>Notice:</strong> Teacher and student accounts are provisioned by institution administrators. Public self-registration is disabled. If you received an invitation, please follow the link in your email or use <em>Password Setup</em> on the login screen.
+                  </div>
+                )}
+
+                <form onSubmit={handleAuthSubmit} className="auth-form">
+                  {currentView === "signup" && (
+                    <>
+                      <div className="form-group">
+                        <label htmlFor="fullname">Full Name</label>
+                        <div className="input-wrapper">
+                          <Users size={16} />
+                          <input 
+                            type="text" 
+                            id="fullname" 
+                            placeholder="John Doe" 
+                            value={nameInput} 
+                            onChange={(e) => setNameInput(e.target.value)} 
+                            required
+                          />
+                        </div>
+                      </div>
+                      <div className="form-group">
+                        <label htmlFor="auth-institution">Institution</label>
+                        <div className="input-wrapper">
+                          <School size={16} />
+                          <select 
+                            id="auth-institution"
+                            value={institutionInput}
+                            onChange={(e) => setInstitutionInput(e.target.value)}
+                            required
+                          >
+                            <option value="" disabled>Select an institution</option>
+                            <option value="inst-1">St. Xavier High School</option>
+                            <option value="inst-2">Cambridge Global Academy</option>
+                          </select>
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  <div className="form-group">
+                    <label htmlFor="email">Email Address</label>
+                    <div className="input-wrapper">
+                      <Mail size={16} />
+                      <input 
+                        type="email" 
+                        id="email" 
+                        placeholder="you@school.edu" 
+                        value={emailInput} 
+                        onChange={(e) => setEmailInput(e.target.value)} 
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div className="form-group">
+                    <label htmlFor="password">Password</label>
+                    <div className="input-wrapper">
+                      <Lock size={16} />
+                      <input 
+                        type={showPassword ? "text" : "password"} 
+                        id="password" 
+                        placeholder="••••••••" 
+                        value={passwordInput} 
+                        onChange={(e) => setPasswordInput(e.target.value)} 
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="password-toggle-btn"
+                        onClick={() => setShowPassword(!showPassword)}
+                        aria-label={showPassword ? "Hide password" : "Show password"}
+                        title={showPassword ? "Hide password" : "Show password"}
+                      >
+                        {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button type="submit" className="btn btn-primary btn-block">
+                    {currentView === "login" ? "Log In" : "Sign Up"}
+                  </button>
+                </form>
+
+                <div className="auth-card-footer">
+                  {currentView === "login" ? (
+                    <div>
+                      <div style={{ marginBottom: '10px' }}>
+                        <button 
+                          type="button" 
+                          onClick={() => { setCurrentView("reset-password"); setResetSent(false); }}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--ev-primary)', cursor: 'pointer', fontSize: '0.85rem', textDecoration: 'underline' }}
+                        >
+                          First time signing in or forgot password?
+                        </button>
+                      </div>
+                      <p>
+                        New to EduVault?{' '}
+                        <span onClick={() => { setCurrentView("signup"); setEmailInput(""); }}>Registration info</span>
+                      </p>
+                    </div>
+                  ) : (
+                    <p>
+                      Already have an account?{' '}
+                      <span onClick={() => { setCurrentView("login"); setEmailInput(""); }}>Log in instead</span>
+                    </p>
+                  )}
+                  <div style={{ marginTop: '12px' }}>
+                    <button 
+                      type="button" 
+                      onClick={() => setCurrentView("home")}
+                      className="btn btn-secondary btn-sm"
+                      style={{ width: '100%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                    >
+                      <ArrowLeft size={14} />
+                      <span>Back to Home</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </main>
@@ -2799,10 +3135,12 @@ function App() {
       )}
 
       {/* Notification Toast */}
-      <div className={`toast ${toast.show ? 'show' : ''}`}>
-        {getToastIcon(toast.icon)}
-        <span>{toast.message}</span>
-      </div>
+      {toast.show && (
+        <div className="toast show" role="status" aria-live="polite">
+          {getToastIcon(toast.icon)}
+          <span>{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }

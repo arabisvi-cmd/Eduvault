@@ -973,23 +973,7 @@ export default function AcademicSetup({ userProfile }) {
     <div style={{ padding: '0', maxWidth: '1200px', margin: '0 auto' }}>
       {/* Toast Notification */}
       {toast && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 10000,
-          background: toast.type === 'error' ? '#DC2626' : 'var(--ev-primary)',
-          color: '#FFFFFF',
-          padding: '12px 20px',
-          borderRadius: '8px',
-          boxShadow: 'var(--ev-shadow-lg)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          fontSize: '13px',
-          fontWeight: 500,
-          animation: 'ev-modal-enter 0.2s ease-out'
-        }}>
+        <div className={`ev-toast-banner ${toast.type === 'error' ? 'error' : 'success'}`}>
           <CheckCircle size={16} />
           <span>{toast.message}</span>
         </div>

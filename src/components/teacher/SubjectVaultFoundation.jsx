@@ -526,23 +526,7 @@ export default function SubjectVaultFoundation({ subject, userProfile, onBack })
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', color: 'var(--ev-text)' }}>
       {/* Toast Notification Banner */}
       {toast && (
-        <div style={{
-          position: 'fixed',
-          top: '20px',
-          right: '20px',
-          zIndex: 10000,
-          background: toast.type === 'error' ? '#DC2626' : 'var(--ev-primary)',
-          color: '#FFFFFF',
-          padding: '12px 20px',
-          borderRadius: '8px',
-          boxShadow: 'var(--ev-shadow-lg)',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '10px',
-          fontSize: '13px',
-          fontWeight: 500,
-          animation: 'ev-modal-enter 0.2s ease-out'
-        }}>
+        <div className={`ev-toast-banner ${toast.type === 'error' ? 'error' : 'success'}`}>
           {toast.type === 'error' ? <AlertCircle size={16} /> : <CheckCircle size={16} />}
           <span>{toast.message}</span>
         </div>
