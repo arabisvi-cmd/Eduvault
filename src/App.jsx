@@ -7,9 +7,12 @@ import {
   Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, Sparkles, X, Check,
-  Share2, FolderInput, Copy, Pencil, ExternalLink, Settings, Bell
+  Share2, FolderInput, Copy, Pencil, ExternalLink, Settings, Bell, LogOut,
+  Sun, Moon, CircleDot
 } from 'lucide-react';
 import AdminAcademicManager from './AdminAcademicManager';
+import AdminPeopleHub from './components/admin/AdminPeopleHub';
+import AdminDataMigration from './components/admin/AdminDataMigration';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import MySubjects from './MySubjects';
 import GlobalSearch from './GlobalSearch';
@@ -334,14 +337,91 @@ function Modal({ title, icon: Icon, onClose, children }) {
   );
 }
 
+const getInitials = (nameOrEmail) => {
+  if (!nameOrEmail) return 'EV';
+  const clean = nameOrEmail.trim();
+  if (clean.includes(' ')) {
+    const parts = clean.split(' ').filter(Boolean);
+    return (parts[0][0] + (parts[1] ? parts[1][0] : '')).toUpperCase();
+  }
+  return clean.slice(0, 2).toUpperCase();
+};
+
 function App() {
   const [searchQuery, setSearchQuery] = useState("");
   
+  const getInitialView = () => {
+    const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+    if (['login', 'signup', 'workspace'].includes(hash)) {
+      return hash;
+    }
+    return 'home';
+  };
+
   // Navigation & Authentication states
-  const [currentView, setCurrentView] = useState("home"); // 'home', 'workspace', 'login', 'signup'
+  const [currentView, setCurrentView] = useState(getInitialView);
   const [currentUser, setCurrentUser] = useState(null); // Supabase session user object
   const [userProfile, setUserProfile] = useState(null); // Database public.users profile
   const [isAuthLoading, setIsAuthLoading] = useState(true);
+
+  // Professional Account Menu & Logout Modal states
+  const [showAccountMenu, setShowAccountMenu] = useState(false);
+  const [showLogoutConfirmModal, setShowLogoutConfirmModal] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const accountMenuRef = useRef(null);
+
+  // Synchronize URL hash with currentView (preserving in-page anchors like #how-it-works)
+  useEffect(() => {
+    if (currentView === 'home') {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (['login', 'signup', 'workspace'].includes(hash)) {
+        history.replaceState(null, '', window.location.pathname + window.location.search);
+      }
+    } else {
+      window.location.hash = currentView;
+    }
+  }, [currentView]);
+
+  // Handle browser back/forward buttons
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+      if (['home', 'login', 'signup', 'workspace'].includes(hash)) {
+        setCurrentView(hash);
+      }
+    };
+    window.addEventListener('hashchange', handleHashChange);
+    return () => window.removeEventListener('hashchange', handleHashChange);
+  }, []);
+
+  // Close account menu on outside click
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (accountMenuRef.current && !accountMenuRef.current.contains(e.target)) {
+        setShowAccountMenu(false);
+      }
+    };
+    if (showAccountMenu) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showAccountMenu]);
+
+  // Handle Escape key for account menu and logout modal
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Escape") {
+        if (showLogoutConfirmModal && !isLoggingOut) {
+          setShowLogoutConfirmModal(false);
+        }
+        if (showAccountMenu) {
+          setShowAccountMenu(false);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [showLogoutConfirmModal, isLoggingOut, showAccountMenu]);
 
   // Home dashboard: real counts from Supabase (null = loading, -1 = error/unavailable)
   const [homeStats, setHomeStats] = useState(null);
@@ -388,8 +468,18 @@ function App() {
   const [renameFolderInputVal, setRenameFolderInputVal] = useState("");
   const [sharingFolder, setSharingFolder] = useState(null);
 
-  // Appearance System
-  const [appearance, setAppearance] = useState(() => localStorage.getItem('eduvault-appearance') || 'system');
+  // 3-Mode Theme System (Light, Dark, AMOLED)
+  const getInitialAppearance = () => {
+    const saved = localStorage.getItem('eduvault-appearance');
+    if (saved && ['light', 'dark', 'amoled'].includes(saved)) {
+      return saved;
+    }
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
+      return 'dark';
+    }
+    return 'light';
+  };
+  const [appearance, setAppearance] = useState(getInitialAppearance);
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', appearance);
     localStorage.setItem('eduvault-appearance', appearance);
@@ -463,10 +553,19 @@ function App() {
       if (session?.user) {
         setCurrentUser(session.user);
         loadProfile(session.user.id);
+        const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+        if (hash === 'home') {
+          setCurrentView('home');
+        } else {
+          setCurrentView('workspace');
+        }
       } else {
         setCurrentUser(null);
         setUserProfile(null);
         setIsAuthLoading(false);
+        // NO SESSION: Workspace is NOT allowed. If currentView is workspace, redirect to login.
+        // If currentView is home, login, or signup, keep it!
+        setCurrentView(prev => (prev === 'workspace' ? 'login' : prev));
       }
     });
 
@@ -475,10 +574,23 @@ function App() {
       if (session?.user) {
         setCurrentUser(session.user);
         loadProfile(session.user.id);
+        if (_event === 'SIGNED_IN') {
+          setCurrentView('workspace');
+        } else if (_event === 'INITIAL_SESSION') {
+          const hash = window.location.hash.replace(/^#\/?/, '').toLowerCase();
+          if (hash !== 'home') {
+            setCurrentView('workspace');
+          }
+        }
       } else {
         setCurrentUser(null);
         setUserProfile(null);
         setIsAuthLoading(false);
+        if (_event === 'SIGNED_OUT') {
+          setCurrentView('login');
+        } else {
+          setCurrentView(prev => (prev === 'workspace' ? 'login' : prev));
+        }
       }
     });
 
@@ -846,18 +958,31 @@ function App() {
     setCurrentView("workspace");
   };
 
-  const handleLogout = async () => {
-    if (isSupabaseConfigured && supabase) {
-      try {
-        await supabase.auth.signOut();
-      } catch (err) {
-        console.warn("Logout error:", err);
+  const handleLogout = () => {
+    setShowAccountMenu(false);
+    setShowLogoutConfirmModal(true);
+  };
+
+  const handleConfirmLogout = async () => {
+    if (isLoggingOut) return;
+    setIsLoggingOut(true);
+    try {
+      if (isSupabaseConfigured && supabase) {
+        const { error } = await supabase.auth.signOut();
+        if (error) throw error;
       }
+      setCurrentUser(null);
+      setUserProfile(null);
+      setShowAccountMenu(false);
+      setShowLogoutConfirmModal(false);
+      setCurrentView("login");
+      showToast("Signed out successfully", "info");
+    } catch (err) {
+      console.error("Sign out error:", err);
+      showToast("Unable to sign out cleanly. Please try again.", "error");
+    } finally {
+      setIsLoggingOut(false);
     }
-    setCurrentUser(null);
-    setUserProfile(null);
-    setCurrentView("home");
-    showToast("Logged out successfully", "info");
   };
 
   const getDocTypeIcon = (type) => {
@@ -995,7 +1120,14 @@ function App() {
       {/* Global Header Navigation */}
       <header className={`main-header ${currentView === 'workspace' ? 'gdrive-header' : ''}`}>
         <div className="header-container">
-          <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setCurrentView("home")}>
+          <div className="logo" style={{ cursor: 'pointer' }} onClick={() => {
+            if (currentUser) {
+              setCurrentView("workspace");
+              setSelectedNav("home");
+            } else {
+              setCurrentView("home");
+            }
+          }}>
             <ShieldCheck className="logo-icon" />
             <span className="logo-text">Edu<span>Vault</span></span>
           </div>
@@ -1009,29 +1141,146 @@ function App() {
           )}
 
           <div className="header-actions">
+            {/* 3-Mode Icon Theme Switcher */}
+            <div className="theme-switcher" role="group" aria-label="Color theme switcher">
+              <button
+                type="button"
+                className={`theme-btn ${appearance === 'light' ? 'active' : ''}`}
+                onClick={() => setAppearance('light')}
+                aria-label="Switch to Light mode"
+                aria-pressed={appearance === 'light'}
+                title="Switch to Light mode"
+              >
+                <Sun size={15} />
+              </button>
+              <button
+                type="button"
+                className={`theme-btn ${appearance === 'dark' ? 'active' : ''}`}
+                onClick={() => setAppearance('dark')}
+                aria-label="Switch to Dark mode"
+                aria-pressed={appearance === 'dark'}
+                title="Switch to Dark mode"
+              >
+                <Moon size={15} />
+              </button>
+              <button
+                type="button"
+                className={`theme-btn ${appearance === 'amoled' ? 'active' : ''}`}
+                onClick={() => setAppearance('amoled')}
+                aria-label="Switch to AMOLED mode"
+                aria-pressed={appearance === 'amoled'}
+                title="Switch to AMOLED mode"
+              >
+                <CircleDot size={15} />
+              </button>
+            </div>
+
             {currentUser ? (
-              <div className="user-profile-header" style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-                <select 
-                  value={appearance} 
-                  onChange={(e) => setAppearance(e.target.value)}
-                  style={{ padding: '6px', borderRadius: '4px', border: '1px solid var(--ev-border)', background: 'var(--ev-surface)', color: 'var(--ev-text)' }}
-                  aria-label="Appearance"
-                >
-                  <option value="system">System</option>
-                  <option value="light">Light</option>
-                  <option value="dark">Dark</option>
-                  <option value="amoled">AMOLED</option>
-                </select>
-                <button className="btn btn-secondary" onClick={handleLogout}>
-                  <Mail size={16} />
-                  <span>{currentUser?.email} (Logout)</span>
-                </button>
+              <div className="user-profile-header" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                {currentView === "home" ? (
+                  <button className="btn btn-primary btn-sm" onClick={() => setCurrentView("workspace")}>
+                    <ArrowRight size={14} />
+                    <span>Workspace</span>
+                  </button>
+                ) : (
+                  <button className="btn btn-secondary btn-sm" onClick={() => setCurrentView("home")} title="Public Home Page">
+                    <Home size={14} />
+                    <span>Public Home</span>
+                  </button>
+                )}
+
+                {/* Professional Account Control Menu */}
+                <div className="account-menu-container" ref={accountMenuRef}>
+                  <button 
+                    className={`account-menu-trigger ${showAccountMenu ? 'active' : ''}`}
+                    onClick={() => setShowAccountMenu(prev => !prev)}
+                    aria-expanded={showAccountMenu}
+                    aria-haspopup="true"
+                    aria-label="Account options"
+                  >
+                    <div className="account-avatar">
+                      {getInitials(userProfile?.full_name || currentUser?.email)}
+                    </div>
+                    <div className="account-meta">
+                      <span className="account-name">
+                        {userProfile?.full_name || currentUser?.email?.split('@')[0]}
+                      </span>
+                      <span className="account-role-badge">
+                        {userProfile?.role || 'MEMBER'}
+                      </span>
+                    </div>
+                    <ChevronDown size={14} className={`account-chevron ${showAccountMenu ? 'open' : ''}`} />
+                  </button>
+
+                  {showAccountMenu && (
+                    <div className="account-dropdown-menu" role="menu">
+                      <div className="account-dropdown-header">
+                        <div className="account-avatar-lg">
+                          {getInitials(userProfile?.full_name || currentUser?.email)}
+                        </div>
+                        <div className="account-dropdown-user-details">
+                          <div className="account-dropdown-fullname">
+                            {userProfile?.full_name || 'Academic User'}
+                          </div>
+                          <div className="account-dropdown-email">
+                            {currentUser?.email}
+                          </div>
+                          <div className="account-dropdown-tags">
+                            <span className="role-tag">{userProfile?.role || 'MEMBER'}</span>
+                            {institutionName && (
+                              <span className="inst-tag" title={institutionName}>{institutionName}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="account-dropdown-divider" />
+
+                      <div className="account-dropdown-section">
+                        <div className="account-dropdown-item info-only">
+                          <Shield size={15} />
+                          <div className="item-text-group">
+                            <span className="item-label">Account Scope</span>
+                            <span className="item-value">
+                              {userProfile?.role === 'ADMIN' ? 'Institutional Administrator' : userProfile?.role === 'TEACHER' ? 'Faculty Staff' : 'Enrolled Student'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="account-dropdown-item info-only">
+                          <School size={15} />
+                          <div className="item-text-group">
+                            <span className="item-label">Institution Scope</span>
+                            <span className="item-value">
+                              {institutionName || userProfile?.institution_id || 'EduVault Primary'}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="account-dropdown-divider" />
+
+                      <div className="account-dropdown-footer">
+                        <button 
+                          className="account-signout-btn" 
+                          onClick={() => {
+                            setShowAccountMenu(false);
+                            setShowLogoutConfirmModal(true);
+                          }}
+                          role="menuitem"
+                        >
+                          <LogOut size={15} />
+                          <span>Sign out</span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               </div>
             ) : (
               <>
                 {(currentView === "home" || currentView === "workspace") ? (
                   <>
-                    <button className="btn btn-secondary" onClick={() => { setCurrentView("login"); setEmailInput("arabisvi@gmail.com"); }}>
+                    <button className="btn btn-secondary" onClick={() => { setCurrentView("login"); setEmailInput(""); }}>
                       <LogIn size={16} />
                       <span>Log In</span>
                     </button>
@@ -1065,7 +1314,14 @@ function App() {
                 </p>
                 
                 <div className="ev-hero-buttons">
-                  <button className="btn btn-primary btn-lg" onClick={() => { setCurrentView("login"); setEmailInput(""); }}>
+                  <button className="btn btn-primary btn-lg" onClick={() => { 
+                    if (currentUser) {
+                      setCurrentView("workspace");
+                    } else {
+                      setCurrentView("login"); 
+                      setEmailInput(""); 
+                    }
+                  }}>
                     <span>Enter EduVault</span>
                     <ArrowRight size={18} />
                   </button>
@@ -1241,13 +1497,31 @@ function App() {
                 </button>
 
                 {userProfile?.role === 'ADMIN' && (
-                  <button 
-                    className={`gdrive-nav-item ${selectedNav === 'admin-academic' ? 'active' : ''}`}
-                    onClick={() => { setSelectedNav('admin-academic'); setActiveFolderId(null); }}
-                  >
-                    <Settings size={18} />
-                    <span>Academic Structure</span>
-                  </button>
+                  <>
+                    <button 
+                      className={`gdrive-nav-item ${selectedNav === 'admin-academic' ? 'active' : ''}`}
+                      onClick={() => { setSelectedNav('admin-academic'); setActiveFolderId(null); }}
+                    >
+                      <Settings size={18} />
+                      <span>Academic Setup</span>
+                    </button>
+
+                    <button 
+                      className={`gdrive-nav-item ${selectedNav === 'admin-people' ? 'active' : ''}`}
+                      onClick={() => { setSelectedNav('admin-people'); setActiveFolderId(null); }}
+                    >
+                      <Users size={18} />
+                      <span>People</span>
+                    </button>
+
+                    <button 
+                      className={`gdrive-nav-item ${selectedNav === 'admin-import' ? 'active' : ''}`}
+                      onClick={() => { setSelectedNav('admin-import'); setActiveFolderId(null); }}
+                    >
+                      <UploadCloud size={18} />
+                      <span>Data Import</span>
+                    </button>
+                  </>
                 )}
 
                 <button 
@@ -1385,6 +1659,14 @@ function App() {
                 <div className="gdrive-content-canvas" style={{ padding: 0, overflow: 'hidden' }}>
                   <AdminAcademicManager userProfile={userProfile} />
                 </div>
+              ) : selectedNav === 'admin-people' ? (
+                <div className="gdrive-content-canvas" style={{ padding: '32px 40px', overflowY: 'auto' }}>
+                  <AdminPeopleHub userProfile={userProfile} />
+                </div>
+              ) : selectedNav === 'admin-import' ? (
+                <div className="gdrive-content-canvas" style={{ padding: '32px 40px', overflowY: 'auto' }}>
+                  <AdminDataMigration userProfile={userProfile} onNavigate={setSelectedNav} />
+                </div>
               ) : selectedNav === 'classes' && (userProfile?.role === 'TEACHER' || userProfile?.role === 'STUDENT') ? (
                 <div className="gdrive-content-canvas" style={{ padding: 0, overflow: 'hidden' }}>
                   <MySubjects userProfile={userProfile} activeSubject={activeSubject} setActiveSubject={setActiveSubject} />
@@ -1395,10 +1677,10 @@ function App() {
                     <School size={48} style={{ color: 'var(--ev-text-secondary)', opacity: 0.4 }} />
                     <h2 style={{ color: 'var(--ev-text)', fontSize: '1.3rem', fontWeight: 600 }}>My Subjects</h2>
                     <p style={{ color: 'var(--ev-text-secondary)', maxWidth: '400px', lineHeight: 1.6 }}>
-                      As an administrator, you manage subjects through <strong>Academic Structure</strong>. Teachers and students see their assigned subjects here.
+                      As an administrator, you manage subjects through <strong>Academic Setup</strong>. Teachers and students see their assigned subjects here.
                     </p>
                     <button className="btn btn-secondary" onClick={() => setSelectedNav('admin-academic')}>
-                      <Settings size={16} /> <span>Go to Academic Structure</span>
+                      <Settings size={16} /> <span>Go to Academic Setup</span>
                     </button>
                   </div>
                 </div>
@@ -1509,14 +1791,14 @@ function App() {
                     }}>
                       <p style={{ margin: 0, color: 'var(--ev-text-secondary)', fontSize: '0.9rem', lineHeight: 1.6 }}>
                         <strong style={{ color: 'var(--ev-text)' }}>Getting started:</strong> No academic years have been configured yet.
-                        Begin by setting up your academic structure &mdash; add an academic year, programs, terms, and subjects.
+                        Begin by setting up your Academic Setup &mdash; add an academic year, programs, terms, and subjects.
                       </p>
                       <button
                         className="btn btn-primary"
                         style={{ marginTop: '14px', fontSize: '0.875rem' }}
                         onClick={() => setSelectedNav('admin-academic')}
                       >
-                        <Settings size={15} /> <span>Set up Academic Structure</span>
+                        <Settings size={15} /> <span>Set up Academic Setup</span>
                       </button>
                     </div>
                   )}
@@ -1529,18 +1811,46 @@ function App() {
                     maxWidth: '900px'
                   }}>
                     {userProfile?.role === 'ADMIN' && (
-                      <div
-                        onClick={() => setSelectedNav('admin-academic')}
-                        style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
-                        onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
-                        onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
-                      >
-                        <Settings size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
-                        <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>Academic Structure</h3>
-                        <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
-                          Manage years, programs, terms, and subjects.
-                        </p>
-                      </div>
+                      <>
+                        <div
+                          onClick={() => setSelectedNav('admin-academic')}
+                          style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
+                          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
+                          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
+                        >
+                          <Settings size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
+                          <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>Academic Setup</h3>
+                          <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
+                            Manage years, programs, terms, and subjects.
+                          </p>
+                        </div>
+
+                        <div
+                          onClick={() => setSelectedNav('admin-people')}
+                          style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
+                          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
+                          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
+                        >
+                          <Users size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
+                          <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>People & Allocations</h3>
+                          <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
+                            Manage teachers, students, assignments, and enrollments.
+                          </p>
+                        </div>
+
+                        <div
+                          onClick={() => setSelectedNav('admin-import')}
+                          style={{ cursor: 'pointer', padding: '22px', border: '1px solid var(--ev-border)', borderRadius: '12px', background: 'var(--ev-surface-elevated)', transition: 'border-color 0.2s' }}
+                          onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--ev-primary)'}
+                          onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--ev-border)'}
+                        >
+                          <UploadCloud size={22} style={{ color: 'var(--ev-primary)', marginBottom: '12px' }} />
+                          <h3 style={{ fontSize: '1rem', marginBottom: '6px', color: 'var(--ev-text)', fontWeight: 600 }}>Data Import</h3>
+                          <p style={{ color: 'var(--ev-text-secondary)', fontSize: '0.85rem', lineHeight: 1.55, margin: 0 }}>
+                            Ingest curriculum spreadsheets, departments, and course rosters.
+                          </p>
+                        </div>
+                      </>
                     )}
 
                     <div
@@ -2430,6 +2740,53 @@ function App() {
             </div>
           </form>
         </Modal>
+      )}
+
+      {/* Deliberate Logout Confirmation Modal */}
+      {showLogoutConfirmModal && (
+        <div className="gdrive-modal-overlay" onClick={() => !isLoggingOut && setShowLogoutConfirmModal(false)}>
+          <div 
+            className="logout-confirm-card" 
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="logout-dialog-title"
+          >
+            <div className="logout-dialog-icon">
+              <LogOut size={22} />
+            </div>
+            <h3 id="logout-dialog-title">Sign out of EduVault?</h3>
+            <p className="logout-dialog-description">
+              You will need to sign in again to access your academic workspace and materials.
+            </p>
+
+            <div className="logout-dialog-actions">
+              <button 
+                type="button" 
+                className="btn btn-secondary" 
+                onClick={() => setShowLogoutConfirmModal(false)}
+                disabled={isLoggingOut}
+              >
+                Cancel
+              </button>
+              <button 
+                type="button" 
+                className="btn btn-danger-signout" 
+                onClick={handleConfirmLogout}
+                disabled={isLoggingOut}
+              >
+                {isLoggingOut ? (
+                  <>
+                    <span className="btn-spinner" />
+                    <span>Signing out...</span>
+                  </>
+                ) : (
+                  <span>Sign out</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Global Footer (only for non-workspace view) */}

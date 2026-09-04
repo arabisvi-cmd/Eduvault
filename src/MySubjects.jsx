@@ -3,8 +3,13 @@ import { supabase } from './lib/supabase';
 import { BookOpen } from 'lucide-react';
 import SubjectVault from './SubjectVault';
 import Notices from './Notices';
+import TeacherMySubjects from './components/teacher/TeacherMySubjects';
 
 export default function MySubjects({ userProfile }) {
+  if (userProfile?.role === 'TEACHER') {
+    return <TeacherMySubjects userProfile={userProfile} />;
+  }
+
   const [subjects, setSubjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeSubject, setActiveSubject] = useState(null);
