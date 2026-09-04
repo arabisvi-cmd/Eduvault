@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from './lib/supabase';
 import { BookOpen } from 'lucide-react';
-import SubjectVault from './SubjectVault';
+import SubjectVaultFoundation from './components/teacher/SubjectVaultFoundation';
 import Notices from './Notices';
 import TeacherMySubjects from './components/teacher/TeacherMySubjects';
 
@@ -57,7 +57,7 @@ export default function MySubjects({ userProfile }) {
   }
 
   if (activeSubject) {
-    return <SubjectVault subject={activeSubject} userProfile={userProfile} onBack={() => setActiveSubject(null)} />;
+    return <SubjectVaultFoundation subject={activeSubject} userProfile={userProfile} onBack={() => setActiveSubject(null)} />;
   }
 
   const renderStudentOverview = () => {
