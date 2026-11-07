@@ -5,7 +5,8 @@ compatibility_date = "2024-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "eduvault-db"
-# Replace with your database_id from Cloudflare D1 dashboard if desired, 
-# or Cloudflare Pages will use the binding configured in the dashboard.
-database_id = "eduvault-db"
+database_id = "aee23ea2-0df7-4133-9d0f-c5fdc492f134"
 
+[[previews.d1_databases]]
+binding = "DB"
+database_id = "aee23ea2-0df7-4133-9d0f-c5fdc492f134"
