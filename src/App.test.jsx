@@ -29,6 +29,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
   it('should render the app logo and vision description on loading', () => {
     render(<App />);
     expect(screen.getAllByText(/Edu/i)[0]).toBeInTheDocument();
+    expect(screen.getByText("A PersonAI product")).toBeInTheDocument();
     expect(screen.getByText(/Secure Workspace for/i)).toBeInTheDocument();
   });
 
