@@ -10,6 +10,7 @@ import {
   Share2, FolderInput, Copy, Pencil, ExternalLink
 } from 'lucide-react';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
+import { api } from './lib/api';
 
 const INITIAL_FOLDERS = [
   { id: "folder-1", name: "Physics Lecture Slides", path: "in EduVault Drive" },
@@ -424,36 +425,20 @@ function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Supabase Auth & Document Fetching
+  // Auth & Document Fetching (supports Cloudflare D1 API with Supabase fallback)
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
+    // 1. Check local session from Cloudflare D1 / local storage
+    const savedUser = api.auth.getCurrentUser();
+    if (savedUser?.email) {
+      setCurrentUser(savedUser.email);
+    }
 
-    // Check existing auth session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        setCurrentUser(session.user.email);
-      }
-    });
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setCurrentUser(session.user.email);
-      } else {
-        setCurrentUser(null);
-      }
-    });
-
-    // Fetch documents from Supabase
+    // 2. Load documents from Cloudflare D1 API, fallback to Supabase if configured
     async function loadDocuments() {
       try {
-        const { data, error } = await supabase
-          .from('documents')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!error && data && data.length > 0) {
-          const mappedDocs = data.map(doc => ({
+        const d1Docs = await api.documents.list();
+        if (d1Docs && d1Docs.length > 0) {
+          const mappedDocs = d1Docs.map(doc => ({
             id: doc.id,
             title: doc.title,
             institution: doc.institution,
@@ -468,20 +453,67 @@ function App() {
             owner: doc.owner || "me",
             section: doc.section || "Section A",
             role: doc.role || "students",
-            folderId: doc.folderId || null,
-            previewType: doc.file_type === 'image' ? 'diagram-preview' : doc.file_type === 'xlsx' ? 'sheet-preview' : doc.file_type === 'code' ? 'code-preview' : 'pdf-text'
+            folderId: doc.folder_id || doc.folderId || null,
+            previewType: (doc.file_type || doc.type) === 'image' ? 'diagram-preview' : (doc.file_type || doc.type) === 'xlsx' ? 'sheet-preview' : (doc.file_type || doc.type) === 'code' ? 'code-preview' : 'pdf-text'
           }));
           setDocuments(mappedDocs);
+          return;
         }
-      } catch (err) {
-        console.warn('Could not load documents from Supabase, using defaults', err);
+      } catch {
+        // Cloudflare D1 API not responding or offline (e.g. during local offline dev)
+      }
+
+      // Supabase fallback if configured
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('documents')
+            .select('*')
+            .order('created_at', { ascending: false });
+
+          if (!error && data && data.length > 0) {
+            const mappedDocs = data.map(doc => ({
+              id: doc.id,
+              title: doc.title,
+              institution: doc.institution,
+              year: doc.academic_year || doc.year || '2026-2027',
+              class: doc.class_grade || doc.class || 'grade-10',
+              subject: doc.subject || 'physics',
+              timeline: doc.timeline || 'term-1',
+              type: doc.file_type || doc.type || 'pdf',
+              size: doc.file_size || doc.size || '1.0 MB',
+              date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recently',
+              activity: `Uploaded • ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Recently'}`,
+              owner: doc.owner || "me",
+              section: doc.section || "Section A",
+              role: doc.role || "students",
+              folderId: doc.folderId || null,
+              previewType: doc.file_type === 'image' ? 'diagram-preview' : doc.file_type === 'xlsx' ? 'sheet-preview' : doc.file_type === 'code' ? 'code-preview' : 'pdf-text'
+            }));
+            setDocuments(mappedDocs);
+          }
+        } catch (err) {
+          console.warn('Could not load documents from Supabase, using defaults', err);
+        }
       }
     }
 
     loadDocuments();
 
+    // Check Supabase session if configured
+    let subscription;
+    if (isSupabaseConfigured && supabase) {
+      supabase.auth.getSession().then(({ data: { session } }) => {
+        if (session?.user) setCurrentUser(session.user.email);
+      });
+      const sub = supabase.auth.onAuthStateChange((_event, session) => {
+        if (session?.user) setCurrentUser(session.user.email);
+      });
+      subscription = sub?.data?.subscription;
+    }
+
     return () => {
-      subscription?.unsubscribe();
+      subscription?.unsubscribe?.();
     };
   }, []);
   const filteredDocs = documents.filter(doc => {
@@ -590,26 +622,48 @@ function App() {
       previewType: type === 'image' ? 'diagram-preview' : type === 'xlsx' ? 'sheet-preview' : type === 'code' ? 'code-preview' : 'pdf-text'
     };
 
-    if (isSupabaseConfigured && supabase) {
-      try {
-        const { data, error } = await supabase.from('documents').insert([{
-          title: newDoc.title,
-          institution: newDoc.institution,
-          academic_year: newDoc.year,
-          class_grade: newDoc.class,
-          subject: newDoc.subject,
-          timeline: newDoc.timeline,
-          file_type: newDoc.type,
-          file_size: newDoc.size
-        }]).select();
+    // Attempt to persist to Cloudflare D1 API first
+    try {
+      const savedDoc = await api.documents.create({
+        title: newDoc.title,
+        institution: newDoc.institution,
+        academic_year: newDoc.year,
+        class_grade: newDoc.class,
+        subject: newDoc.subject,
+        timeline: newDoc.timeline,
+        file_type: newDoc.type,
+        file_size: newDoc.size,
+        owner: newDoc.owner,
+        section: newDoc.section,
+        role: newDoc.role,
+        folder_id: newDoc.folderId
+      });
+      if (savedDoc?.id) {
+        newDoc.id = savedDoc.id;
+      }
+    } catch {
+      // If Cloudflare D1 API is unavailable, fallback to Supabase if configured
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase.from('documents').insert([{
+            title: newDoc.title,
+            institution: newDoc.institution,
+            academic_year: newDoc.year,
+            class_grade: newDoc.class,
+            subject: newDoc.subject,
+            timeline: newDoc.timeline,
+            file_type: newDoc.type,
+            file_size: newDoc.size
+          }]).select();
 
-        if (error) {
-          console.error("Supabase insert error:", error);
-        } else if (data && data[0]) {
-          newDoc.id = data[0].id;
+          if (error) {
+            console.error("Supabase insert error:", error);
+          } else if (data && data[0]) {
+            newDoc.id = data[0].id;
+          }
+        } catch (err) {
+          console.warn("Could not insert document to Supabase:", err);
         }
-      } catch (err) {
-        console.warn("Could not insert document to Supabase:", err);
       }
     }
 
@@ -712,6 +766,40 @@ function App() {
       return;
     }
 
+    // 1. Try Cloudflare D1 Auth API first
+    try {
+      if (currentView === "login") {
+        const res = await api.auth.login(emailInput, passwordInput);
+        const userEmail = res.user?.email || emailInput;
+        setCurrentUser(userEmail);
+        showToast(`Welcome back, ${userEmail}!`, "check-circle");
+      } else {
+        const res = await api.auth.signup({
+          email: emailInput,
+          password: passwordInput,
+          full_name: nameInput,
+          institution: institutionInput
+        });
+        const userEmail = res.user?.email || emailInput;
+        setCurrentUser(userEmail);
+        showToast(`Account created successfully for ${userEmail}!`, "check-circle");
+      }
+      setEmailInput("");
+      setPasswordInput("");
+      setNameInput("");
+      setCurrentView("home");
+      return;
+    } catch (d1Err) {
+      // If error is a network/fetch issue (like local dev without running Worker or test runner), fall back to Supabase/mock
+      const isFetchError = d1Err.name === 'TypeError' || 
+                           d1Err.message?.includes('Failed to fetch') || 
+                           d1Err.message?.includes('Failed to parse URL');
+      if (!isFetchError) {
+        showToast(d1Err.message, "info");
+        return;
+      }
+    }
+
     if (isSupabaseConfigured && supabase) {
       try {
         if (currentView === "login") {
@@ -765,6 +853,7 @@ function App() {
   };
 
   const handleLogout = async () => {
+    api.auth.logout();
     if (isSupabaseConfigured && supabase) {
       try {
         await supabase.auth.signOut();
@@ -911,9 +1000,12 @@ function App() {
       {/* Global Header Navigation */}
       <header className={`main-header ${currentView === 'workspace' ? 'gdrive-header' : ''}`}>
         <div className="header-container">
-          <div className="logo" style={{ cursor: 'pointer' }} onClick={() => setCurrentView("home")}>
-            <ShieldCheck className="logo-icon" />
-            <span className="logo-text">Edu<span>Vault</span></span>
+          <div className="logo-wrapper" style={{ cursor: 'pointer' }} onClick={() => setCurrentView("home")}>
+            <div className="logo">
+              <ShieldCheck className="logo-icon" />
+              <span className="logo-text">Edu<span>Vault</span></span>
+            </div>
+            <span className="logo-caption">A PersonAI product</span>
           </div>
 
           {(currentView === "home" || currentView === "workspace") && (
