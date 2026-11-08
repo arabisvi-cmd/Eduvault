@@ -355,6 +355,8 @@ function App() {
   const [passwordInput, setPasswordInput] = useState("");
   const [nameInput, setNameInput] = useState("");
   const [institutionInput, setInstitutionInput] = useState("inst-1");
+  const [authError, setAuthError] = useState("");
+  const [authSubmitting, setAuthSubmitting] = useState(false);
 
   const [colorTheme, setColorTheme] = useState(() => {
     if (typeof document !== 'undefined') {
@@ -848,61 +850,66 @@ function App() {
     }
   };
 
+  const shouldFallbackFromApi = (err) => {
+    if (err?.name === 'TypeError' || err?.name === 'SyntaxError') return true;
+    const msg = err?.message || '';
+    return /failed to fetch|API unavailable|not configured/i.test(msg);
+  };
+
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
+    setAuthError("");
     if (!emailInput || !passwordInput) {
-      showToast("Please fill in all required fields", "info");
+      setAuthError("Please fill in email and password.");
+      return;
+    }
+    if (isSignup && !nameInput.trim()) {
+      setAuthError("Please enter your full name.");
       return;
     }
 
-    // 1. Try Cloudflare D1 Auth API first
+    setAuthSubmitting(true);
     try {
-      if (isLogin) {
-        const res = await api.auth.login(emailInput, passwordInput);
-        const userEmail = res.user?.email || emailInput;
-        setCurrentUser(userEmail);
-        showToast(`Welcome back, ${userEmail}!`, "check-circle");
-      } else {
-        const res = await api.auth.signup({
-          email: emailInput,
-          password: passwordInput,
-          full_name: nameInput,
-          institution: institutionInput
-        });
-        const userEmail = res.user?.email || emailInput;
-        setCurrentUser(userEmail);
-        showToast(`Account created successfully for ${userEmail}!`, "check-circle");
-      }
-      setEmailInput("");
-      setPasswordInput("");
-      setNameInput("");
-      goAfterAuth();
-      return;
-    } catch (d1Err) {
-      // If error is a network/fetch issue (like local dev without running Worker or test runner), fall back to Supabase/mock
-      const isFetchError = d1Err.name === 'TypeError' || 
-                           d1Err.message?.includes('Failed to fetch') || 
-                           d1Err.message?.includes('Failed to parse URL');
-      if (!isFetchError) {
-        showToast(d1Err.message, "info");
-        return;
-      }
-    }
-
-    if (isSupabaseConfigured && supabase) {
+      // 1. Try Cloudflare D1 Auth API first
       try {
+        if (isLogin) {
+          const res = await api.auth.login(emailInput, passwordInput);
+          const userEmail = res.user?.email || emailInput;
+          setCurrentUser(userEmail);
+        } else if (isSignup) {
+          const res = await api.auth.signup({
+            email: emailInput,
+            password: passwordInput,
+            full_name: nameInput,
+            institution: institutionInput
+          });
+          const userEmail = res.user?.email || emailInput;
+          setCurrentUser(userEmail);
+        }
+        setEmailInput("");
+        setPasswordInput("");
+        setNameInput("");
+        goAfterAuth();
+        return;
+      } catch (d1Err) {
+        if (!shouldFallbackFromApi(d1Err)) {
+          setAuthError(d1Err.message || "Sign-up failed. Please try again.");
+          return;
+        }
+      }
+
+      if (isSupabaseConfigured && supabase) {
         if (isLogin) {
           const { data, error } = await supabase.auth.signInWithPassword({
             email: emailInput,
             password: passwordInput
           });
           if (error) {
-            showToast(error.message, "info");
+            setAuthError(error.message);
             return;
           }
           setCurrentUser(data.user?.email || emailInput);
-          showToast(`Welcome back, ${data.user?.email || emailInput}!`, "check-circle");
-        } else {
+        } else if (isSignup) {
           const { data, error } = await supabase.auth.signUp({
             email: emailInput,
             password: passwordInput,
@@ -914,31 +921,25 @@ function App() {
             }
           });
           if (error) {
-            showToast(error.message, "info");
+            setAuthError(error.message);
             return;
           }
           setCurrentUser(data.user?.email || emailInput);
-          showToast(`Account created successfully for ${emailInput}!`, "check-circle");
         }
-      } catch (err) {
-        showToast(err.message || "Authentication error", "info");
-        return;
-      }
-    } else {
-      // Fallback for local simulation
-      if (isLogin) {
-        setCurrentUser(emailInput);
-        showToast(`Welcome back, ${emailInput}!`, "check-circle");
       } else {
+        // Local / demo when /api is not available
         setCurrentUser(emailInput);
-        showToast(`Account created successfully for ${emailInput}!`, "check-circle");
       }
+
+      setEmailInput("");
+      setPasswordInput("");
+      setNameInput("");
+      goAfterAuth();
+    } catch (err) {
+      setAuthError(err.message || "Something went wrong. Please try again.");
+    } finally {
+      setAuthSubmitting(false);
     }
-    
-    setEmailInput("");
-    setPasswordInput("");
-    setNameInput("");
-    goAfterAuth();
   };
 
   const handleLogout = async () => {
@@ -2171,6 +2172,9 @@ function App() {
               </div>
 
               <form onSubmit={handleAuthSubmit} className="auth-form">
+                {authError ? (
+                  <p className="auth-error" role="alert">{authError}</p>
+                ) : null}
                 {isSignup && (
                   <>
                     <div className="form-group">
@@ -2234,8 +2238,10 @@ function App() {
                   </div>
                 </div>
 
-                <button type="submit" className="btn btn-primary btn-block">
-                  {isLogin ? "Log In" : "Sign Up"}
+                <button type="submit" className="btn btn-primary btn-block" disabled={authSubmitting}>
+                  {authSubmitting
+                    ? (isLogin ? "Logging in…" : "Creating account…")
+                    : (isLogin ? "Log In" : "Sign Up")}
                 </button>
               </form>
 

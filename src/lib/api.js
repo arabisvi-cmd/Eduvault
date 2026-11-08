@@ -11,6 +11,20 @@ async function safeFetch(url, options = {}) {
   return fetch(url, options);
 }
 
+async function parseApiJson(res) {
+  const contentType = res.headers.get('content-type') || '';
+  if (!contentType.includes('application/json')) {
+    throw new TypeError('API unavailable');
+  }
+  const data = await res.json();
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
 export const api = {
   // Authentication
   auth: {
@@ -20,8 +34,7 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Login failed');
+      const data = await parseApiJson(res);
       localStorage.setItem('eduvault_user', JSON.stringify(data.user));
       return data;
     },
@@ -32,8 +45,7 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, full_name, institution }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Signup failed');
+      const data = await parseApiJson(res);
       localStorage.setItem('eduvault_user', JSON.stringify(data.user));
       return data;
     },

@@ -69,15 +69,21 @@ In the Cloudflare dashboard:
 
 ---
 
-## 5. Bind your D1 Database to your Pages Project
-Once the initial deployment completes:
-1. In your Cloudflare Pages project, go to **Settings** → **Functions**.
-2. Scroll down to **D1 Database Bindings**.
-3. Click **Add binding**:
-   - **Variable name**: `DB`  *(Must be uppercase `DB`)*
-   - **D1 database**: Select `eduvault-db`
-4. Click **Save**.
-5. Trigger a redeploy (or push any commit to `main`).
+## 5. D1 binding (Workers Git deploy — `npx wrangler deploy`)
 
-Your application is now live on the public web with an edge-replicated database and authentication, incurring **$0 in recurring costs**!
+This repo uses a **Worker + static assets** deploy (`wrangler.toml`), not Pages-only static.
+
+D1 is declared in `wrangler.toml` as binding **`DB`** → `eduvault-db`. After you connect Git:
+
+1. Open **Workers & Pages** → **eduvault** → **Settings** → **Bindings** (or **Variables and secrets**).
+2. Confirm **D1** binding **`DB`** points at **`eduvault-db`** (same database id as in `wrangler.toml` if you use dashboard overrides).
+3. **Build command:** `npm run build`  
+   **Deploy command:** `npx wrangler deploy`  
+4. Redeploy. The Worker (`worker/index.js`) serves **`/api/*`** (auth + documents); everything else is the Vite SPA from `dist/`.
+
+**Verify:** `curl -s -X POST 'https://<your-worker-url>/api/auth/signup' -H 'Content-Type: application/json' -d '{"email":"test@school.edu","password":"pass123","full_name":"Test","institution":"inst-1"}'` should return JSON `success: true`, then check D1 Console: `SELECT * FROM users;`.
+
+### Optional: Cloudflare Pages (instead of Worker deploy)
+
+If you use **Pages** with the `functions/` folder only (no custom `wrangler deploy`), bind D1 under **Settings → Functions → D1 database bindings** with variable name **`DB`**, then redeploy.
 
