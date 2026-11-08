@@ -1,8 +1,32 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import React from 'react';
 import App from './App';
 import '@testing-library/jest-dom';
+
+function renderApp(initialPath = '/') {
+  return render(
+    <MemoryRouter initialEntries={[initialPath]}>
+      <App />
+    </MemoryRouter>
+  );
+}
+
+vi.mock('./lib/api', () => ({
+  api: {
+    auth: {
+      login: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      signup: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      logout: vi.fn(),
+      getCurrentUser: vi.fn().mockReturnValue(null),
+    },
+    documents: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({}),
+    },
+  },
+}));
 
 vi.mock('./lib/supabase', () => ({
   isSupabaseConfigured: true,
@@ -25,16 +49,27 @@ vi.mock('./lib/supabase', () => ({
   }
 }));
 
+async function loginTestUser() {
+  const loginBtn = screen.getByRole('button', { name: /Log In/i });
+  fireEvent.click(loginBtn);
+  fireEvent.change(screen.getByPlaceholderText('you@school.edu'), { target: { value: 'arabisvi@gmail.com' } });
+  fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'password123' } });
+  fireEvent.click(screen.getByRole('button', { name: 'Log In' }));
+  await waitFor(() => {
+    expect(screen.getByRole('link', { name: /Workspace/i })).toBeInTheDocument();
+  });
+}
+
 describe('EduVault App Rendering & Navigation tests', () => {
   it('should render the app logo and vision description on loading', () => {
-    render(<App />);
+    renderApp();
     expect(screen.getAllByText(/Edu/i)[0]).toBeInTheDocument();
-    expect(screen.getByText("A PersonAI product")).toBeInTheDocument();
+    expect(screen.getByText("By PersonAI")).toBeInTheDocument();
     expect(screen.getByText(/Secure Workspace for/i)).toBeInTheDocument();
   });
 
   it('should toggle to login page when clicking Log In button', () => {
-    render(<App />);
+    renderApp();
     
     // Find the Log In button in the navigation header
     const loginBtn = screen.getByRole('button', { name: /Log In/i });
@@ -49,7 +84,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
   });
 
   it('should sign in and update user context when submitting form', async () => {
-    render(<App />);
+    renderApp();
     
     // Navigate to Login Page
     const loginBtn = screen.getByRole('button', { name: /Log In/i });
@@ -73,7 +108,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
   });
 
   it('should filter documents when typing in the hero search bar', () => {
-    render(<App />);
+    renderApp();
 
     // Get hero search input
     const searchInput = screen.getByTestId('hero-search-input');
@@ -87,15 +122,22 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.queryByText('Mid-Term Physics Study Guide')).not.toBeInTheDocument();
   });
 
-  it('should navigate to Google Drive Workspace and display suggested folders & files', () => {
-    render(<App />);
+  it('should send guests to login when opening workspace without signing in', () => {
+    renderApp();
+    fireEvent.click(screen.getByRole('button', { name: /Launch EduVault Workspace/i }));
+    expect(screen.getByRole('heading', { name: /Welcome Back/i })).toBeInTheDocument();
+  });
+
+  it('should navigate to Google Drive Workspace and display suggested folders & files', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Click Workspace navigation link
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
     fireEvent.click(workspaceLink);
 
-    // Verify Google Drive UI elements
-    expect(screen.getByRole('heading', { name: /Welcome to EduVault Drive/i })).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-context-title')).toHaveTextContent(/St\. Xavier High School/);
+    expect(screen.getByTestId('workspace-context-title')).toHaveTextContent(/Physics/);
     expect(screen.getByText('Suggested folders')).toBeInTheDocument();
     expect(screen.getByText('Suggested files')).toBeInTheDocument();
     
@@ -109,11 +151,12 @@ describe('EduVault App Rendering & Navigation tests', () => {
     // Check for academic files
     expect(screen.getAllByText('Mid-Term Physics Study Guide')[0]).toBeInTheDocument();
     expect(screen.getAllByText('Thermodynamics Lab Report Template')[0]).toBeInTheDocument();
-    expect(screen.getByText('14.2 GB of 100 GB used')).toBeInTheDocument();
+    expect(screen.getByText('14.2 GB of 100 GB library used')).toBeInTheDocument();
   });
 
-  it('should toggle view mode between grid and list in Drive workspace', () => {
-    render(<App />);
+  it('should toggle view mode between grid and list in Drive workspace', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Navigate to Workspace
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
@@ -128,8 +171,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByRole('columnheader', { name: /File size/i })).toBeInTheDocument();
   });
 
-  it('should navigate into a folder and go back when clicking the Back button', () => {
-    render(<App />);
+  it('should navigate into a folder and go back when clicking the Back button', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Navigate to Workspace
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
@@ -140,7 +184,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
     fireEvent.click(folderCard);
 
     // Verify we are inside the folder and Back button is shown
-    const backBtn = screen.getByRole('button', { name: /Back/i });
+    const backBtn = screen.getByTitle('Go back to all folders');
     expect(backBtn).toBeInTheDocument();
 
     // Click the Back button
@@ -150,8 +194,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByText('Suggested folders')).toBeInTheDocument();
   });
 
-  it('should show inline folder card in Suggested folders when clicking New folder', () => {
-    render(<App />);
+  it('should show inline folder card in Suggested folders when clicking New folder', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Navigate to Workspace
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
@@ -178,8 +223,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByText('Biology Field Work')).toBeInTheDocument();
   });
 
-  it('should display file action options matching reference image when clicking 3 dots on a file card', () => {
-    render(<App />);
+  it('should display file action options matching reference image when clicking 3 dots on a file card', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Navigate to Workspace
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
@@ -209,8 +255,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByRole('button', { name: /Copy Link/i })).toBeInTheDocument();
   });
 
-  it('should display folder action options (Download, Rename, Share, Folder information, Move to trash) when clicking 3 dots on a folder card', () => {
-    render(<App />);
+  it('should display folder action options (Download, Rename, Share, Folder information, Move to trash) when clicking 3 dots on a folder card', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Navigate to Workspace
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
@@ -238,8 +285,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByText('Rename folder')).toBeInTheDocument();
   });
 
-  it('should allow user to create custom filters and apply them in workspace', () => {
-    render(<App />);
+  it('should allow user to create custom filters and apply them in workspace', async () => {
+    renderApp();
+    await loginTestUser();
 
     // Navigate to Workspace
     const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
