@@ -10,6 +10,16 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function publicUser(row) {
+  return {
+    id: row.id,
+    email: row.email,
+    full_name: row.full_name,
+    institution: row.institution,
+    profile_image: row.profile_image || '',
+  };
+}
+
 async function hashPassword(password, saltHex = null) {
   const enc = new TextEncoder();
   const salt = saltHex
@@ -115,7 +125,13 @@ export async function handleApi(request, env) {
 
       return jsonResponse({
         success: true,
-        user: { id: userId, email: email.toLowerCase(), full_name, institution }
+        user: {
+          id: userId,
+          email: email.toLowerCase(),
+          full_name,
+          institution,
+          profile_image: '',
+        }
       });
     }
 
@@ -137,8 +153,96 @@ export async function handleApi(request, env) {
 
       return jsonResponse({
         success: true,
-        user: { id: user.id, email: user.email, full_name: user.full_name, institution: user.institution }
+        user: publicUser(user),
       });
+    }
+
+    if (path === '/auth/update-profile' && request.method === 'POST') {
+      const { email, full_name } = await request.json();
+      const trimmed = (full_name || '').trim();
+      if (!email || !trimmed) {
+        return jsonResponse({ error: 'Email and name are required' }, 400);
+      }
+
+      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
+      if (!user) {
+        return jsonResponse({ error: 'Account not found' }, 404);
+      }
+
+      await env.DB.prepare('UPDATE users SET full_name = ? WHERE id = ?').bind(trimmed, user.id).run();
+      const updated = { ...user, full_name: trimmed };
+      return jsonResponse({ success: true, user: publicUser(updated) });
+    }
+
+    if (path === '/auth/profile-image' && request.method === 'POST') {
+      const { email, image_data } = await request.json();
+      if (!email || !image_data) {
+        return jsonResponse({ error: 'Email and image are required' }, 400);
+      }
+      const isDataUrl = /^data:image\/(jpeg|jpg|png|webp|gif);base64,/i.test(image_data);
+      if (!isDataUrl) {
+        return jsonResponse({ error: 'Upload a JPEG, PNG, WebP, or GIF image' }, 400);
+      }
+      // shortcut: ~450KB data URL cap, revisit if avatars move to R2
+      if (image_data.length > 450000) {
+        return jsonResponse({ error: 'Image is too large (max about 400KB)' }, 400);
+      }
+
+      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
+      if (!user) {
+        return jsonResponse({ error: 'Account not found' }, 404);
+      }
+
+      await env.DB.prepare('UPDATE users SET profile_image = ? WHERE id = ?').bind(image_data, user.id).run();
+      const updated = { ...user, profile_image: image_data };
+      return jsonResponse({ success: true, user: publicUser(updated) });
+    }
+
+    if (path === '/auth/change-password' && request.method === 'POST') {
+      const { email, current_password, new_password } = await request.json();
+      if (!email || !current_password || !new_password) {
+        return jsonResponse({ error: 'Email, current password, and new password are required' }, 400);
+      }
+      if (new_password.length < 8) {
+        return jsonResponse({ error: 'New password must be at least 8 characters' }, 400);
+      }
+
+      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
+      if (!user) {
+        return jsonResponse({ error: 'Account not found' }, 404);
+      }
+
+      const { hash: currentHash } = await hashPassword(current_password, user.salt);
+      if (currentHash !== user.password_hash) {
+        return jsonResponse({ error: 'Current password is incorrect' }, 401);
+      }
+
+      const { hash, salt } = await hashPassword(new_password);
+      await env.DB.prepare(
+        'UPDATE users SET password_hash = ?, salt = ? WHERE id = ?'
+      ).bind(hash, salt, user.id).run();
+
+      return jsonResponse({ success: true });
+    }
+
+    if (path === '/auth/delete-account' && request.method === 'POST') {
+      const { email, password } = await request.json();
+      if (!email || !password) {
+        return jsonResponse({ error: 'Email and password are required to delete your account' }, 400);
+      }
+
+      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
+      if (!user) {
+        return jsonResponse({ error: 'Account not found' }, 404);
+      }
+
+      const { hash } = await hashPassword(password, user.salt);
+      if (hash !== user.password_hash) {
+        return jsonResponse({ error: 'Password is incorrect' }, 401);
+      }
+
+      await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
+      return jsonResponse({ success: true });
     }
 
     return jsonResponse({ error: `Not found: ${path}` }, 404);

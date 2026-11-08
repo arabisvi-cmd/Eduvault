@@ -7,7 +7,8 @@ import {
   Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, X, Check, Sun, Moon,
-  Share2, FolderInput, Copy, Pencil, ExternalLink
+  Share2, FolderInput, Copy, Pencil, ExternalLink,
+  User, Settings, LogOut
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -313,6 +314,35 @@ const FILTER_DEFINITIONS = {
   }
 };
 
+function sessionFromApiUser(user, fallbackEmail = '', fallbackName = '') {
+  const email = (user?.email || fallbackEmail || '').trim();
+  if (!email) return null;
+  const full_name = (user?.full_name || fallbackName || '').trim();
+  const profile_image = user?.profile_image || '';
+  return { email, full_name, profile_image };
+}
+
+function UserAvatar({ user, className = '', size = 16 }) {
+  if (user?.profile_image) {
+    return (
+      <img
+        src={user.profile_image}
+        alt=""
+        className={`user-avatar-img ${className}`.trim()}
+        width={size}
+        height={size}
+      />
+    );
+  }
+  return <User size={size} className={className} aria-hidden={className ? undefined : true} />;
+}
+
+function userDisplayName(user) {
+  if (!user?.email) return 'Account';
+  if (user.full_name) return user.full_name;
+  return user.email.split('@')[0];
+}
+
 function Modal({ title, icon: Icon, onClose, children }) {
   return (
     <div className="gdrive-modal-overlay" onClick={onClose}>
@@ -347,8 +377,22 @@ function App() {
   const isWorkspace = location.pathname === '/workspace';
   const isLogin = location.pathname === '/login';
   const isSignup = location.pathname === '/signup';
+  const isAccount = location.pathname === '/account';
 
-  const [currentUser, setCurrentUser] = useState(null); // Simulated logged in user email
+  const [currentUser, setCurrentUser] = useState(null); // { email, full_name }
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  const [pwdCurrent, setPwdCurrent] = useState("");
+  const [pwdNew, setPwdNew] = useState("");
+  const [pwdConfirm, setPwdConfirm] = useState("");
+  const [accountNotice, setAccountNotice] = useState("");
+  const [accountError, setAccountError] = useState("");
+  const [accountBusy, setAccountBusy] = useState(false);
+  const [showDeleteAccountConfirm, setShowDeleteAccountConfirm] = useState(false);
+  const [deleteAccountPassword, setDeleteAccountPassword] = useState("");
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [pwdModalError, setPwdModalError] = useState("");
+  const [accountNameInput, setAccountNameInput] = useState("");
+  const [isEditingAccountName, setIsEditingAccountName] = useState(false);
   
   // Form states
   const [emailInput, setEmailInput] = useState("");
@@ -411,6 +455,7 @@ function App() {
   const fileInputRef = useRef(null);
   const newDropdownRef = useRef(null);
   const inlineFolderInputRef = useRef(null);
+  const avatarInputRef = useRef(null);
 
   const showToast = () => {};
 
@@ -443,18 +488,25 @@ function App() {
   const scrollToRoadmap = () => goToHomeSection('roadmap');
 
   useEffect(() => {
-    const allowed = new Set(['/', '/login', '/signup', '/workspace']);
+    const allowed = new Set(['/', '/login', '/signup', '/workspace', '/account']);
     if (!allowed.has(location.pathname)) {
       navigate('/', { replace: true });
     }
   }, [location.pathname, navigate]);
 
   useEffect(() => {
-    if (isWorkspace && !currentUser) {
+    if ((isWorkspace || isAccount) && !currentUser) {
       setEmailInput("arabisvi@gmail.com");
       navigate('/login', { replace: true, state: { from: location } });
     }
-  }, [isWorkspace, currentUser, navigate, location]);
+  }, [isWorkspace, isAccount, currentUser, navigate, location]);
+
+  useEffect(() => {
+    if (isAccount && currentUser) {
+      setAccountNameInput(currentUser.full_name || userDisplayName(currentUser));
+      setIsEditingAccountName(false);
+    }
+  }, [isAccount, currentUser?.email, currentUser?.full_name]);
 
   useEffect(() => {
     const target = location.state?.scrollTo;
@@ -497,7 +549,7 @@ function App() {
     // 1. Check local session from Cloudflare D1 / local storage
     const savedUser = api.auth.getCurrentUser();
     if (savedUser?.email) {
-      setCurrentUser(savedUser.email);
+      setCurrentUser(sessionFromApiUser(savedUser));
     }
 
     // 2. Load documents from Cloudflare D1 API, fallback to Supabase if configured
@@ -571,10 +623,18 @@ function App() {
     let subscription;
     if (isSupabaseConfigured && supabase) {
       supabase.auth.getSession().then(({ data: { session } }) => {
-        if (session?.user) setCurrentUser(session.user.email);
+        if (session?.user) {
+          setCurrentUser(sessionFromApiUser(
+            { email: session.user.email, full_name: session.user.user_metadata?.full_name }
+          ));
+        }
       });
       const sub = supabase.auth.onAuthStateChange((_event, session) => {
-        if (session?.user) setCurrentUser(session.user.email);
+        if (session?.user) {
+          setCurrentUser(sessionFromApiUser(
+            { email: session.user.email, full_name: session.user.user_metadata?.full_name }
+          ));
+        }
       });
       subscription = sub?.data?.subscription;
     }
@@ -697,7 +757,7 @@ function App() {
         : (file.size / 1024).toFixed(0) + ' KB',
       date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
       activity: `You uploaded • ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
-      owner: currentUser ? currentUser.split('@')[0] : "me",
+      owner: currentUser?.email ? currentUser.email.split('@')[0] : "me",
       section: "Section A",
       role: "students",
       folderId: activeFolderId,
@@ -874,8 +934,7 @@ function App() {
       try {
         if (isLogin) {
           const res = await api.auth.login(emailInput, passwordInput);
-          const userEmail = res.user?.email || emailInput;
-          setCurrentUser(userEmail);
+          setCurrentUser(sessionFromApiUser(res.user, emailInput));
         } else if (isSignup) {
           const res = await api.auth.signup({
             email: emailInput,
@@ -883,8 +942,7 @@ function App() {
             full_name: nameInput,
             institution: institutionInput
           });
-          const userEmail = res.user?.email || emailInput;
-          setCurrentUser(userEmail);
+          setCurrentUser(sessionFromApiUser(res.user, emailInput, nameInput));
         }
         setEmailInput("");
         setPasswordInput("");
@@ -908,7 +966,10 @@ function App() {
             setAuthError(error.message);
             return;
           }
-          setCurrentUser(data.user?.email || emailInput);
+          setCurrentUser(sessionFromApiUser(
+            { email: data.user?.email, full_name: data.user?.user_metadata?.full_name },
+            emailInput
+          ));
         } else if (isSignup) {
           const { data, error } = await supabase.auth.signUp({
             email: emailInput,
@@ -924,11 +985,19 @@ function App() {
             setAuthError(error.message);
             return;
           }
-          setCurrentUser(data.user?.email || emailInput);
+          setCurrentUser(sessionFromApiUser(
+            { email: data.user?.email, full_name: nameInput },
+            emailInput,
+            nameInput
+          ));
         }
       } else {
         // Local / demo when /api is not available
-        setCurrentUser(emailInput);
+        setCurrentUser(sessionFromApiUser(
+          null,
+          emailInput,
+          isSignup ? nameInput : ''
+        ));
       }
 
       setEmailInput("");
@@ -939,6 +1008,169 @@ function App() {
       setAuthError(err.message || "Something went wrong. Please try again.");
     } finally {
       setAuthSubmitting(false);
+    }
+  };
+
+  const openAccount = () => {
+    if (!requireAuth()) return;
+    setAccountNotice("");
+    setAccountError("");
+    navigate('/account');
+  };
+
+  const persistUserLocal = (user) => {
+    if (!user?.email) return;
+    try {
+      localStorage.setItem('eduvault_user', JSON.stringify({
+        email: user.email,
+        full_name: user.full_name || '',
+        profile_image: user.profile_image || '',
+      }));
+    } catch { /* ignored */ }
+  };
+
+  const handleAvatarPick = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file || !currentUser?.email) return;
+    setAccountNotice("");
+    setAccountError("");
+    if (!file.type.startsWith('image/')) {
+      setAccountError("Please choose an image file.");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 400 * 1024) {
+      setAccountError("Image must be 400KB or smaller.");
+      e.target.value = "";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const imageData = reader.result;
+      if (typeof imageData !== 'string') return;
+      setAccountBusy(true);
+      try {
+        const res = await api.auth.uploadProfileImage(currentUser.email, imageData);
+        const next = sessionFromApiUser(res.user, currentUser.email, currentUser.full_name);
+        setCurrentUser(next);
+        setAccountNotice("Profile photo updated.");
+      } catch (err) {
+        if (shouldFallbackFromApi(err)) {
+          const next = { ...currentUser, profile_image: imageData };
+          setCurrentUser(next);
+          persistUserLocal(next);
+          setAccountNotice("Photo saved on this device (API unavailable).");
+        } else {
+          setAccountError(err.message || "Could not upload photo.");
+        }
+      } finally {
+        setAccountBusy(false);
+        e.target.value = "";
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveName = async (e) => {
+    e.preventDefault();
+    setAccountNotice("");
+    setAccountError("");
+    if (!currentUser?.email) return;
+    const trimmed = accountNameInput.trim();
+    if (!trimmed) {
+      setAccountError("Name cannot be empty.");
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      const res = await api.auth.updateProfile(currentUser.email, trimmed);
+      const next = sessionFromApiUser(res.user, currentUser.email, trimmed);
+      setCurrentUser({ ...next, profile_image: currentUser.profile_image || next.profile_image });
+      setAccountNameInput(trimmed);
+      setIsEditingAccountName(false);
+      setAccountNotice("Name updated.");
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) {
+        const next = { ...currentUser, full_name: trimmed };
+        setCurrentUser(next);
+        persistUserLocal(next);
+        setIsEditingAccountName(false);
+        setAccountNotice("Name saved on this device (API unavailable).");
+      } else {
+        setAccountError(err.message || "Could not update name.");
+      }
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const openChangePasswordModal = () => {
+    setPwdModalError("");
+    setPwdCurrent("");
+    setPwdNew("");
+    setPwdConfirm("");
+    setShowChangePasswordModal(true);
+  };
+
+  const handleChangePassword = async (e) => {
+    e.preventDefault();
+    setPwdModalError("");
+    if (!currentUser?.email) return;
+    if (pwdNew !== pwdConfirm) {
+      setPwdModalError("New passwords do not match.");
+      return;
+    }
+    if (pwdNew.length < 8) {
+      setPwdModalError("New password must be at least 8 characters.");
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      await api.auth.changePassword(currentUser.email, pwdCurrent, pwdNew);
+      setPwdCurrent("");
+      setPwdNew("");
+      setPwdConfirm("");
+      setShowChangePasswordModal(false);
+      setAccountNotice("Password updated successfully.");
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) {
+        setPwdModalError("Password changes are only available when connected to the EduVault API.");
+      } else {
+        setPwdModalError(err.message || "Could not update password.");
+      }
+    } finally {
+      setAccountBusy(false);
+    }
+  };
+
+  const handleDeleteAccount = async (e) => {
+    e.preventDefault();
+    setAccountError("");
+    if (!currentUser?.email || !deleteAccountPassword) {
+      setAccountError("Enter your password to confirm deletion.");
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      await api.auth.deleteAccount(currentUser.email, deleteAccountPassword);
+      setShowDeleteAccountConfirm(false);
+      setDeleteAccountPassword("");
+      setCurrentUser(null);
+      if (isSupabaseConfigured && supabase) {
+        try {
+          await supabase.auth.signOut();
+        } catch { /* ignored */ }
+      }
+      navigate('/');
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) {
+        setAccountError("Account deletion is only available when connected to the EduVault API.");
+      } else {
+        setAccountError(err.message || "Could not delete account.");
+      }
+    } finally {
+      setAccountBusy(false);
     }
   };
 
@@ -1177,14 +1409,41 @@ function App() {
               </button>
             </nav>
           )}
-
           <div className="header-actions">
             {currentUser ? (
               <div className="user-profile-header">
-                <button className="btn btn-secondary" onClick={handleLogout}>
-                  <Mail size={16} />
-                  <span>{currentUser} (Logout)</span>
-                </button>
+                <div className="user-account-menu">
+                  <button
+                    type="button"
+                    className="btn btn-secondary user-account-trigger"
+                    aria-haspopup="menu"
+                    aria-label="Account menu"
+                  >
+                    <UserAvatar user={currentUser} size={16} />
+                    <span>{userDisplayName(currentUser)}</span>
+                    <ChevronDown size={16} className="user-account-chevron" aria-hidden="true" />
+                  </button>
+                  <div className="user-account-dropdown" role="menu">
+                    <button type="button" className="dropdown-item" role="menuitem" onClick={openAccount}>
+                      <User size={16} />
+                      <span>Account</span>
+                    </button>
+                    <button type="button" className="dropdown-item" role="menuitem">
+                      <Settings size={16} />
+                      <span>Settings</span>
+                    </button>
+                    <div className="dropdown-divider" role="separator" />
+                    <button
+                      type="button"
+                      className="dropdown-item user-account-signout"
+                      role="menuitem"
+                      onClick={() => setShowLogoutConfirm(true)}
+                    >
+                      <LogOut size={16} />
+                      <span>Sign out</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             ) : (
               <>
@@ -2159,6 +2418,150 @@ function App() {
             </main>
           </div>
         )}
+        {isAccount && currentUser && (
+          <section className="account-section">
+            <div className="container account-page">
+              <div className="account-page-header">
+                <div className="account-page-title-row">
+                  <h1 className="account-page-title">Your account</h1>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm account-back-btn"
+                    onClick={() => navigate('/')}
+                  >
+                    <ArrowLeft size={16} />
+                    <span>Back to home</span>
+                  </button>
+                </div>
+                <p className="account-page-subtitle">Manage your profile and sign-in details.</p>
+              </div>
+
+              {accountNotice ? <p className="account-notice" role="status">{accountNotice}</p> : null}
+              {accountError && !showDeleteAccountConfirm && !showChangePasswordModal ? (
+                <p className="auth-error account-page-alert" role="alert">{accountError}</p>
+              ) : null}
+
+              <div className="account-card">
+                <h2>Profile</h2>
+                <div className="account-avatar-block">
+                  <div className="account-avatar-preview" aria-hidden="true">
+                    <UserAvatar user={currentUser} size={40} className="account-avatar-lg" />
+                  </div>
+                  <div className="account-avatar-actions">
+                    <p className="account-avatar-hint">Upload a profile photo (JPEG, PNG, WebP, or GIF, max 400KB).</p>
+                    <input
+                      ref={avatarInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp,image/gif"
+                      className="account-avatar-input"
+                      onChange={handleAvatarPick}
+                    />
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      disabled={accountBusy}
+                      onClick={() => avatarInputRef.current?.click()}
+                    >
+                      <UploadCloud size={16} />
+                      <span>{accountBusy ? "Uploading…" : "Upload photo"}</span>
+                    </button>
+                  </div>
+                </div>
+                <dl className="account-details">
+                  <div className="account-detail-row account-detail-row-name">
+                    <dt>Name</dt>
+                    <dd>
+                      {!isEditingAccountName ? (
+                        <div className="account-name-display">
+                          <span>{currentUser.full_name || userDisplayName(currentUser)}</span>
+                          <button
+                            type="button"
+                            className="account-name-edit-btn"
+                            aria-label="Edit name"
+                            onClick={() => {
+                              setAccountNameInput(currentUser.full_name || userDisplayName(currentUser));
+                              setAccountError("");
+                              setIsEditingAccountName(true);
+                            }}
+                          >
+                            <Pencil size={16} />
+                          </button>
+                        </div>
+                      ) : (
+                        <form className="account-name-edit-form" onSubmit={handleSaveName}>
+                          <div className="input-wrapper account-name-input-wrap">
+                            <Users size={16} />
+                            <input
+                              id="account-name"
+                              type="text"
+                              value={accountNameInput}
+                              onChange={(e) => setAccountNameInput(e.target.value)}
+                              placeholder="Your full name"
+                              required
+                              autoFocus
+                            />
+                          </div>
+                          <div className="account-name-edit-actions">
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              disabled={accountBusy}
+                              onClick={() => {
+                                setAccountNameInput(currentUser.full_name || userDisplayName(currentUser));
+                                setIsEditingAccountName(false);
+                              }}
+                            >
+                              Cancel
+                            </button>
+                            <button type="submit" className="btn btn-primary btn-sm" disabled={accountBusy}>
+                              {accountBusy ? "Saving…" : "Save"}
+                            </button>
+                          </div>
+                        </form>
+                      )}
+                    </dd>
+                  </div>
+                  <div className="account-detail-row">
+                    <dt>Email</dt>
+                    <dd>{currentUser.email}</dd>
+                  </div>
+                </dl>
+              </div>
+
+              <div className="account-card">
+                <h2>Security</h2>
+                <p className="account-security-text">Update the password you use to sign in.</p>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={openChangePasswordModal}
+                >
+                  <Lock size={16} />
+                  <span>Change password</span>
+                </button>
+              </div>
+
+              <div className="account-card account-card-danger">
+                <h2>Delete account</h2>
+                <p className="account-danger-text">
+                  Permanently remove your account and sign-in from EduVault. This cannot be undone.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-secondary account-delete-btn"
+                  onClick={() => {
+                    setAccountError("");
+                    setDeleteAccountPassword("");
+                    setShowDeleteAccountConfirm(true);
+                  }}
+                >
+                  <Trash2 size={16} />
+                  <span>Delete account</span>
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
         {(isLogin || isSignup) && (
           <section className="auth-section">
             <div className="auth-card">
@@ -2262,6 +2665,194 @@ function App() {
           </section>
         )}
       </main>
+
+      {showChangePasswordModal && (
+        <div
+          className="logout-confirm-overlay"
+          onClick={() => setShowChangePasswordModal(false)}
+          role="presentation"
+        >
+          <div
+            className="logout-confirm-dialog account-password-dialog"
+            role="dialog"
+            aria-labelledby="change-password-title"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="logout-confirm-close"
+              onClick={() => setShowChangePasswordModal(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <h2 id="change-password-title">Change password</h2>
+            <form className="account-password-form auth-form" onSubmit={handleChangePassword}>
+              {pwdModalError ? <p className="auth-error" role="alert">{pwdModalError}</p> : null}
+              <div className="form-group">
+                <label htmlFor="pwd-modal-current">Current password</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input
+                    id="pwd-modal-current"
+                    type="password"
+                    autoComplete="current-password"
+                    value={pwdCurrent}
+                    onChange={(e) => setPwdCurrent(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="pwd-modal-new">New password</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input
+                    id="pwd-modal-new"
+                    type="password"
+                    autoComplete="new-password"
+                    value={pwdNew}
+                    onChange={(e) => setPwdNew(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="pwd-modal-confirm">Re-enter new password</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input
+                    id="pwd-modal-confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    value={pwdConfirm}
+                    onChange={(e) => setPwdConfirm(e.target.value)}
+                    required
+                    minLength={8}
+                  />
+                </div>
+              </div>
+              <div className="logout-confirm-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowChangePasswordModal(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={accountBusy}>
+                  {accountBusy ? "Saving…" : "Continue"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showDeleteAccountConfirm && (
+        <div
+          className="logout-confirm-overlay"
+          onClick={() => setShowDeleteAccountConfirm(false)}
+          role="presentation"
+        >
+          <div
+            className="logout-confirm-dialog account-delete-dialog"
+            role="dialog"
+            aria-labelledby="delete-account-title"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="logout-confirm-close"
+              onClick={() => setShowDeleteAccountConfirm(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <h2 id="delete-account-title">Delete your account?</h2>
+            <p className="account-delete-dialog-copy">
+              This permanently deletes your account. Enter your password to continue.
+            </p>
+            {accountError ? <p className="auth-error" role="alert">{accountError}</p> : null}
+            <form onSubmit={handleDeleteAccount} className="account-delete-form auth-form">
+              <div className="form-group">
+                <label htmlFor="delete-account-password">Password</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input
+                    id="delete-account-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={deleteAccountPassword}
+                    onChange={(e) => setDeleteAccountPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="logout-confirm-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowDeleteAccountConfirm(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary account-delete-btn" disabled={accountBusy}>
+                  {accountBusy ? "Deleting…" : "Delete permanently"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showLogoutConfirm && (
+        <div
+          className="logout-confirm-overlay"
+          onClick={() => setShowLogoutConfirm(false)}
+          role="presentation"
+        >
+          <div
+            className="logout-confirm-dialog"
+            role="dialog"
+            aria-labelledby="logout-confirm-title"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="logout-confirm-close"
+              onClick={() => setShowLogoutConfirm(false)}
+              aria-label="Close"
+            >
+              <X size={18} />
+            </button>
+            <h2 id="logout-confirm-title">Do you really want to sign out?</h2>
+            <div className="logout-confirm-actions">
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={() => setShowLogoutConfirm(false)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  setShowLogoutConfirm(false);
+                  handleLogout();
+                }}
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* File Preview Modal */}
       {selectedFileForPreview && (

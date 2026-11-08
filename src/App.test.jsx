@@ -20,6 +20,10 @@ vi.mock('./lib/api', () => ({
       signup: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
       logout: vi.fn(),
       getCurrentUser: vi.fn().mockReturnValue(null),
+      changePassword: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      deleteAccount: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      uploadProfileImage: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      updateProfile: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
     },
     documents: {
       list: vi.fn().mockResolvedValue([]),
@@ -103,7 +107,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
     
     // Should be returned to Home page and showing user profile button in header
     await waitFor(() => {
-      expect(screen.getByText('arabisvi@gmail.com (Logout)')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Account menu/i })).toBeInTheDocument();
     });
   });
 

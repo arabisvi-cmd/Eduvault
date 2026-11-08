@@ -8,8 +8,11 @@ CREATE TABLE IF NOT EXISTS users (
     salt TEXT NOT NULL,
     full_name TEXT,
     institution TEXT,
+    profile_image TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Existing databases: ALTER TABLE users ADD COLUMN profile_image TEXT;
 
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
