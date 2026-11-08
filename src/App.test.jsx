@@ -20,6 +20,10 @@ vi.mock('./lib/api', () => ({
       signup: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
       logout: vi.fn(),
       getCurrentUser: vi.fn().mockReturnValue(null),
+      changePassword: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      deleteAccount: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      uploadProfileImage: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      updateProfile: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
     },
     documents: {
       list: vi.fn().mockResolvedValue([]),
@@ -103,7 +107,7 @@ describe('EduVault App Rendering & Navigation tests', () => {
     
     // Should be returned to Home page and showing user profile button in header
     await waitFor(() => {
-      expect(screen.getByText('arabisvi@gmail.com (Logout)')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Account menu/i })).toBeInTheDocument();
     });
   });
 
@@ -317,9 +321,8 @@ describe('EduVault App Rendering & Navigation tests', () => {
     // Verify active custom chip appears
     expect(screen.getAllByText(/Class \/ Grade: Grade 10/i)[0]).toBeInTheDocument();
 
-    // Verify Clear all button appears and resets filters
-    const clearAllBtn = screen.getByRole('button', { name: /Clear all/i });
-    fireEvent.click(clearAllBtn);
+    const clearFiltersBtn = screen.getByRole('button', { name: /Clear filters/i });
+    fireEvent.click(clearFiltersBtn);
     expect(screen.queryByText(/Class \/ Grade: Grade 10/i)).not.toBeInTheDocument();
   });
 });

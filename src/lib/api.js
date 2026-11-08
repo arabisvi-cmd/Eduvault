@@ -50,6 +50,56 @@ export const api = {
       return data;
     },
 
+    async updateProfile(email, full_name) {
+      const res = await safeFetch(`${API_BASE}/auth/update-profile`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, full_name }),
+      });
+      const data = await parseApiJson(res);
+      if (data.user) {
+        localStorage.setItem('eduvault_user', JSON.stringify(data.user));
+      }
+      return data;
+    },
+
+    async uploadProfileImage(email, imageData) {
+      const res = await safeFetch(`${API_BASE}/auth/profile-image`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, image_data: imageData }),
+      });
+      const data = await parseApiJson(res);
+      if (data.user) {
+        localStorage.setItem('eduvault_user', JSON.stringify(data.user));
+      }
+      return data;
+    },
+
+    async changePassword(email, currentPassword, newPassword) {
+      const res = await safeFetch(`${API_BASE}/auth/change-password`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          current_password: currentPassword,
+          new_password: newPassword,
+        }),
+      });
+      return parseApiJson(res);
+    },
+
+    async deleteAccount(email, password) {
+      const res = await safeFetch(`${API_BASE}/auth/delete-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+      });
+      const data = await parseApiJson(res);
+      localStorage.removeItem('eduvault_user');
+      return data;
+    },
+
     logout() {
       localStorage.removeItem('eduvault_user');
     },
