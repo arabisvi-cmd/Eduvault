@@ -2,22 +2,23 @@ import React, { useState, useRef, useEffect } from 'react';
 import { 
   ShieldCheck, Mail, ArrowRight, Filter, School, Calendar, 
   Users, BookOpen, Clock, Search, UploadCloud, FileText, 
-  FileSpreadsheet, FileCheck, CheckCircle, Circle, Shield, Info, FolderOpen,
+  FileSpreadsheet, FileCheck, CheckCircle, Circle, Info, FolderOpen,
   Lock, ArrowLeft, LogIn, UserPlus, ChevronRight, Plus,
   Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
-  Film, FileCode, Archive, Sparkles, X, Check,
+  Film, FileCode, Archive, X, Check, Sun, Moon,
   Share2, FolderInput, Copy, Pencil, ExternalLink
 } from 'lucide-react';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
 import { api } from './lib/api';
 
 const INITIAL_FOLDERS = [
-  { id: "folder-1", name: "Physics Lecture Slides", path: "in EduVault Drive" },
-  { id: "folder-2", name: "Chemistry Lab Exercises", path: "in EduVault Drive" },
-  { id: "folder-3", name: "Mathematics Problem Sets", path: "in EduVault Drive" },
-  { id: "folder-4", name: "Administrative Circulars", path: "in EduVault Drive" },
-  { id: "folder-5", name: "Term 1 Question Banks", path: "in EduVault Drive" }
+  { id: "folder-1", name: "Physics Lecture Slides", path: "Grade 10 · Physics · Term 1" },
+  { id: "folder-2", name: "Chemistry Lab Exercises", path: "Grade 10 · Chemistry · Term 1" },
+  { id: "folder-3", name: "Mathematics Problem Sets", path: "Grade 11 · Mathematics · Term 1" },
+  { id: "folder-4", name: "Administrative Circulars", path: "St. Xavier · Admin · Term 1" },
+  { id: "folder-5", name: "Term 1 Question Banks", path: "Grade 10 · Physics · Term 1" }
 ];
 
 const INITIAL_DOCUMENTS = [
@@ -135,7 +136,7 @@ const INITIAL_DOCUMENTS = [
     institution: "inst-1",
     year: "2026-2027",
     class: "grade-10",
-    subject: "physics",
+    subject: "biology",
     timeline: "term-1",
     type: "image",
     size: "3.4 MB",
@@ -189,7 +190,7 @@ const INITIAL_DOCUMENTS = [
     institution: "inst-1",
     year: "2026-2027",
     class: "grade-10",
-    subject: "physics",
+    subject: "chemistry",
     timeline: "term-1",
     type: "pdf",
     size: "1.5 MB",
@@ -340,8 +341,13 @@ function App() {
   const [filterTimeline, setFilterTimeline] = useState("term-1");
   const [searchQuery, setSearchQuery] = useState("");
   
-  // Navigation & Authentication states
-  const [currentView, setCurrentView] = useState("home"); // 'home', 'workspace', 'login', 'signup'
+  const navigate = useNavigate();
+  const location = useLocation();
+  const isHome = location.pathname === '/';
+  const isWorkspace = location.pathname === '/workspace';
+  const isLogin = location.pathname === '/login';
+  const isSignup = location.pathname === '/signup';
+
   const [currentUser, setCurrentUser] = useState(null); // Simulated logged in user email
   
   // Form states
@@ -350,11 +356,27 @@ function App() {
   const [nameInput, setNameInput] = useState("");
   const [institutionInput, setInstitutionInput] = useState("inst-1");
 
-  // Toast System
-  const [toast, setToast] = useState({ show: false, message: "", icon: "info" });
-  
+  const [colorTheme, setColorTheme] = useState(() => {
+    if (typeof document !== 'undefined') {
+      const attr = document.documentElement.getAttribute('data-theme')
+      if (attr === 'light' || attr === 'dark') return attr
+    }
+    return 'dark'
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', colorTheme)
+    try {
+      localStorage.setItem('eduvault-theme', colorTheme)
+    } catch { /* ignored */ }
+  }, [colorTheme])
+
+  const toggleColorTheme = () => {
+    setColorTheme((t) => (t === 'dark' ? 'light' : 'dark'))
+  }
+
   // Workspace specific states
-  const [selectedNav, setSelectedNav] = useState("home"); // 'home', 'classes', 'my-vault', 'shared', 'recent', 'starred', 'trash', 'storage'
+  const [selectedNav, setSelectedNav] = useState("classes"); // 'home', 'classes', 'my-vault', 'shared', 'recent', 'starred', 'trash', 'storage'
   const [workspaceViewMode, setWorkspaceViewMode] = useState("grid"); // 'grid' | 'list'
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const [suggestedFoldersOpen, setSuggestedFoldersOpen] = useState(true);
@@ -388,9 +410,61 @@ function App() {
   const newDropdownRef = useRef(null);
   const inlineFolderInputRef = useRef(null);
 
-  const showToast = (message, icon = "info") => {
-    setToast({ show: true, message, icon });
+  const showToast = () => {};
+
+  const redirectToLogin = () => {
+    setEmailInput("arabisvi@gmail.com");
+    navigate('/login', { state: { from: location } });
   };
+
+  const requireAuth = () => {
+    if (currentUser) return true;
+    redirectToLogin();
+    return false;
+  };
+
+  const openWorkspace = () => {
+    if (!requireAuth()) return;
+    navigate('/workspace');
+  };
+
+  const scrollHomeSection = (sectionId) => {
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const goToHomeSection = (sectionId) => {
+    if (!requireAuth()) return;
+    if (isHome) scrollHomeSection(sectionId);
+    else navigate('/', { state: { scrollTo: sectionId } });
+  };
+
+  const scrollToRoadmap = () => goToHomeSection('roadmap');
+
+  useEffect(() => {
+    const allowed = new Set(['/', '/login', '/signup', '/workspace']);
+    if (!allowed.has(location.pathname)) {
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, navigate]);
+
+  useEffect(() => {
+    if (isWorkspace && !currentUser) {
+      setEmailInput("arabisvi@gmail.com");
+      navigate('/login', { replace: true, state: { from: location } });
+    }
+  }, [isWorkspace, currentUser, navigate, location]);
+
+  useEffect(() => {
+    const target = location.state?.scrollTo;
+    if (!isHome || !target) return;
+    requestAnimationFrame(() => scrollHomeSection(target));
+    navigate('/', { replace: true, state: {} });
+  }, [isHome, location.state, navigate]);
+
+  useEffect(() => {
+    if (!currentUser || !(isLogin || isSignup)) return;
+    goAfterAuth();
+  }, [currentUser, isLogin, isSignup, location.state, navigate]);
 
   useEffect(() => {
     if (isCreatingFolder && inlineFolderInputRef.current) {
@@ -398,15 +472,6 @@ function App() {
       inlineFolderInputRef.current.select();
     }
   }, [isCreatingFolder]);
-
-  useEffect(() => {
-    if (toast.show) {
-      const timer = setTimeout(() => {
-        setToast(prev => ({ ...prev, show: false }));
-      }, 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [toast.show]);
 
   // Close new dropdown and context menus on click outside
   useEffect(() => {
@@ -526,8 +591,19 @@ function App() {
     return true;
   });
 
+  const matchesAcademicFilters = (doc) => {
+    if (filterInst !== 'all' && doc.institution !== filterInst) return false;
+    if (filterYear !== 'all' && doc.year !== filterYear) return false;
+    if (filterClass !== 'all' && doc.class !== filterClass) return false;
+    if (filterSubject !== 'all' && doc.subject !== filterSubject) return false;
+    if (filterTimeline !== 'all' && doc.timeline !== filterTimeline) return false;
+    return true;
+  };
+
   // Workspace Filtered Documents
   const workspaceFilteredDocs = documents.filter(doc => {
+    if (!matchesAcademicFilters(doc)) return false;
+
     // Active folder filter
     if (activeFolderId !== null) {
       if (doc.folderId !== activeFolderId) return false;
@@ -582,6 +658,10 @@ function App() {
   });
 
   const handleWorkspaceFileUpload = async (e) => {
+    if (!requireAuth()) {
+      e.target.value = null;
+      return;
+    }
     const file = e.target.files[0];
     if (!file) return;
 
@@ -683,7 +763,7 @@ function App() {
     const newFolder = {
       id: `folder-${Date.now()}`,
       name: newFolderName.trim(),
-      path: "in EduVault Drive"
+      path: getFolderContextPath()
     };
 
     setFolders([newFolder, ...folders]);
@@ -759,6 +839,15 @@ function App() {
     setRenameFolderInputVal("");
   };
 
+  const goAfterAuth = () => {
+    const from = location.state?.from?.pathname;
+    if (from && from !== '/login' && from !== '/signup') {
+      navigate(from, { replace: true });
+    } else {
+      navigate('/', { replace: true });
+    }
+  };
+
   const handleAuthSubmit = async (e) => {
     e.preventDefault();
     if (!emailInput || !passwordInput) {
@@ -768,7 +857,7 @@ function App() {
 
     // 1. Try Cloudflare D1 Auth API first
     try {
-      if (currentView === "login") {
+      if (isLogin) {
         const res = await api.auth.login(emailInput, passwordInput);
         const userEmail = res.user?.email || emailInput;
         setCurrentUser(userEmail);
@@ -787,7 +876,7 @@ function App() {
       setEmailInput("");
       setPasswordInput("");
       setNameInput("");
-      setCurrentView("home");
+      goAfterAuth();
       return;
     } catch (d1Err) {
       // If error is a network/fetch issue (like local dev without running Worker or test runner), fall back to Supabase/mock
@@ -802,7 +891,7 @@ function App() {
 
     if (isSupabaseConfigured && supabase) {
       try {
-        if (currentView === "login") {
+        if (isLogin) {
           const { data, error } = await supabase.auth.signInWithPassword({
             email: emailInput,
             password: passwordInput
@@ -837,7 +926,7 @@ function App() {
       }
     } else {
       // Fallback for local simulation
-      if (currentView === "login") {
+      if (isLogin) {
         setCurrentUser(emailInput);
         showToast(`Welcome back, ${emailInput}!`, "check-circle");
       } else {
@@ -849,7 +938,7 @@ function App() {
     setEmailInput("");
     setPasswordInput("");
     setNameInput("");
-    setCurrentView("home");
+    goAfterAuth();
   };
 
   const handleLogout = async () => {
@@ -863,6 +952,7 @@ function App() {
     }
     setCurrentUser(null);
     showToast("Logged out successfully", "info");
+    navigate('/');
   };
 
   const getDocTypeIcon = (type) => {
@@ -913,11 +1003,13 @@ function App() {
   };
 
   const renderCardThumbnail = (doc) => {
+    const subjectCaps = doc.subject.charAt(0).toUpperCase() + doc.subject.slice(1);
     switch (doc.previewType) {
       case 'diagram-preview':
         return (
           <div className="thumb-preview diagram-thumb">
-            <div className="diagram-header"><span>BIOLOGY DIAGRAM</span></div>
+            <div className="diagram-header"><span>{subjectCaps}</span></div>
+            <div className="thumb-doc-caption" title={doc.title}>{doc.title}</div>
             <div className="diagram-body">
               <div className="cell-circle"><div className="nucleus"></div></div>
               <div className="diagram-labels"><div className="diag-line"></div><div className="diag-line short"></div></div>
@@ -927,7 +1019,8 @@ function App() {
       case 'code-preview':
         return (
           <div className="thumb-preview ipynb-thumb">
-            <div className="code-header"><div className="jupyter-dot"></div><span>Algorithms & Data</span></div>
+            <div className="code-header"><div className="jupyter-dot"></div><span>{subjectCaps}</span></div>
+            <div className="thumb-doc-caption" title={doc.title}>{doc.title}</div>
             <div className="code-box"><code>function binarySearch(arr, t) {'{ ... }'}</code></div>
           </div>
         );
@@ -935,7 +1028,8 @@ function App() {
         return (
           <div className="thumb-preview agreement-thumb">
             <div className="doc-page">
-              <div className="doc-h1">Safety & Compliance Protocol</div>
+              <div className="doc-h1">{doc.title}</div>
+              <div className="thumb-meta-tag">{subjectCaps}</div>
               <div className="doc-p"></div><div className="doc-p short"></div><div className="doc-sign-line"></div>
             </div>
           </div>
@@ -943,6 +1037,8 @@ function App() {
       case 'sheet-preview':
         return (
           <div className="thumb-preview sheet-thumb">
+            <div className="thumb-doc-caption sheet-caption" title={doc.title}>{doc.title}</div>
+            <div className="thumb-meta-tag">{subjectCaps}</div>
             <table className="mini-sheet">
               <thead><tr><th>ID</th><th>Student</th><th>Score</th><th>Grade</th></tr></thead>
               <tbody><tr><td>101</td><td>Alice M.</td><td>94%</td><td>A</td></tr><tr><td>102</td><td>Bob K.</td><td>88%</td><td>B+</td></tr></tbody>
@@ -956,6 +1052,7 @@ function App() {
           <div className="thumb-preview pdf-doc-thumb">
             <div className="doc-page">
               <div className="doc-h1">{doc.title}</div>
+              <div className="thumb-meta-tag">{subjectCaps}</div>
               <div className="doc-p"></div><div className="doc-p short"></div>
               <div className="doc-p"></div><div className="doc-p mini"></div>
             </div>
@@ -967,29 +1064,59 @@ function App() {
   const getBreadcrumb = () => {
     const instName = filterInst === 'inst-1' ? 'St. Xavier High School' : filterInst === 'inst-2' ? 'Cambridge Global Academy' : 'All Institutions';
     const className = filterClass === 'grade-10' ? 'Grade 10 - A' : filterClass === 'grade-11' ? 'Grade 11 - Science' : filterClass === 'grade-12' ? 'Grade 12 - Commerce' : 'All Classes';
-    const subName = filterSubject.charAt(0).toUpperCase() + filterSubject.slice(1);
+    const subName = filterSubject === 'all' ? 'All Subjects' : filterSubject.charAt(0).toUpperCase() + filterSubject.slice(1);
     const termName = filterTimeline === 'term-1' ? 'Term 1' : filterTimeline === 'term-2' ? 'Term 2' : 'All Terms';
     return `${instName} / ${className} / ${subName} / ${termName}`;
   };
 
-  const getDocIcon = (type) => {
-    switch (type) {
-      case 'xlsx': return <FileSpreadsheet className="doc-icon" />;
-      case 'doc': return <FileCheck className="doc-icon" />;
-      default: return <FileText className="doc-icon" />;
-    }
+  const getFolderContextPath = () => {
+    const classLabel = filterClass === 'grade-10' ? 'Grade 10' : filterClass === 'grade-11' ? 'Grade 11' : filterClass === 'grade-12' ? 'Grade 12' : 'All classes';
+    const subLabel = filterSubject === 'all' ? 'General' : filterSubject.charAt(0).toUpperCase() + filterSubject.slice(1);
+    const termLabel = filterTimeline === 'term-1' ? 'Term 1' : filterTimeline === 'term-2' ? 'Term 2' : 'All terms';
+    return `${classLabel} · ${subLabel} · ${termLabel}`;
   };
 
-  const getToastIcon = (iconName) => {
-    switch (iconName) {
-      case 'check-circle': return <CheckCircle />;
-      case 'shield': return <Shield />;
-      default: return <Info />;
-    }
+  const formatDocMetaLine = (doc) => {
+    const sub = doc.subject.charAt(0).toUpperCase() + doc.subject.slice(1);
+    const term = doc.timeline === 'term-1' ? 'Term 1' : doc.timeline === 'term-2' ? 'Term 2' : doc.timeline;
+    return `${sub} · ${term}`;
   };
+
+  const renderAcademicFilterSelects = (className = '') => (
+    <div className={`academic-filter-row ${className}`.trim()}>
+      <select value={filterInst} onChange={(e) => setFilterInst(e.target.value)} aria-label="Institution">
+        <option value="all">All Institutions</option>
+        <option value="inst-1">St. Xavier High School</option>
+        <option value="inst-2">Cambridge Global Academy</option>
+      </select>
+      <select value={filterYear} onChange={(e) => setFilterYear(e.target.value)} aria-label="Academic Year">
+        <option value="2026-2027">2026 - 2027</option>
+        <option value="2025-2026">2025 - 2026</option>
+      </select>
+      <select value={filterClass} onChange={(e) => setFilterClass(e.target.value)} aria-label="Class">
+        <option value="all">All Classes</option>
+        <option value="grade-10">Grade 10 - A</option>
+        <option value="grade-11">Grade 11 - Science</option>
+        <option value="grade-12">Grade 12 - Commerce</option>
+      </select>
+      <select value={filterSubject} onChange={(e) => setFilterSubject(e.target.value)} aria-label="Subject">
+        <option value="all">All Subjects</option>
+        <option value="physics">Physics</option>
+        <option value="mathematics">Mathematics</option>
+        <option value="chemistry">Chemistry</option>
+        <option value="biology">Biology</option>
+        <option value="english">English</option>
+      </select>
+      <select value={filterTimeline} onChange={(e) => setFilterTimeline(e.target.value)} aria-label="Term">
+        <option value="all">All Terms</option>
+        <option value="term-1">Term 1</option>
+        <option value="term-2">Term 2</option>
+      </select>
+    </div>
+  );
 
   return (
-    <div className={`app-root ${currentView === 'workspace' ? 'gdrive-theme' : ''}`}>
+    <div className={`app-root ${isWorkspace ? 'gdrive-theme' : ''}`}>
       {/* Background glow for all pages */}
       <div className="glow-bg">
         <div className="glow-sphere sphere-1"></div>
@@ -998,42 +1125,55 @@ function App() {
       </div>
 
       {/* Global Header Navigation */}
-      <header className={`main-header ${currentView === 'workspace' ? 'gdrive-header' : ''}`}>
+      <header className={`main-header ${isWorkspace ? 'gdrive-header' : ''}`}>
         <div className="header-container">
-          <div className="logo-wrapper" style={{ cursor: 'pointer' }} onClick={() => setCurrentView("home")}>
+          <div className="logo-wrapper" style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
             <div className="logo">
               <ShieldCheck className="logo-icon" />
               <span className="logo-text">Edu<span>Vault</span></span>
             </div>
-            <span className="logo-caption">A PersonAI product</span>
+            <span className="logo-caption">By PersonAI</span>
           </div>
 
-          {(currentView === "home" || currentView === "workspace") && (
+          {isHome && (
             <nav className="nav-links">
-              <a 
-                href="#concept" 
-                className={currentView === "home" ? "active" : ""} 
-                onClick={(e) => { 
-                  if(currentView !== "home") { 
-                    e.preventDefault(); 
-                    setCurrentView("home"); 
-                  } 
+              <a href="#concept" className="active">Home</a>
+              <a
+                href="#workspace"
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (!requireAuth()) return;
+                  document.getElementById("workspace")?.scrollIntoView({ behavior: "smooth" });
                 }}
               >
-                Home
+                Interactive Demo
               </a>
-              {currentView === "home" && <a href="#workspace">Interactive Demo</a>}
-              {currentView === "home" && <a href="#roadmap">R&D Roadmap</a>}
-              <a 
-                href="#workspace-page" 
-                className={currentView === "workspace" ? "active" : ""} 
-                onClick={(e) => { 
-                  e.preventDefault(); 
-                  setCurrentView("workspace"); 
+              <a
+                href="#roadmap"
+                onClick={(e) => {
+                  e.preventDefault();
+                  scrollToRoadmap();
+                }}
+              >
+                R&D Roadmap
+              </a>
+              <a
+                href="/workspace"
+                onClick={(e) => {
+                  e.preventDefault();
+                  openWorkspace();
                 }}
               >
                 Workspace
               </a>
+            </nav>
+          )}
+          {isWorkspace && (
+            <nav className="nav-links workspace-header-nav">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/')}>
+                <ArrowLeft size={16} />
+                <span>Back to overview</span>
+              </button>
             </nav>
           )}
 
@@ -1047,42 +1187,47 @@ function App() {
               </div>
             ) : (
               <>
-                {(currentView === "home" || currentView === "workspace") ? (
+                {(isHome || isWorkspace) ? (
                   <>
-                    <button className="btn btn-secondary" onClick={() => { setCurrentView("login"); setEmailInput("arabisvi@gmail.com"); }}>
+                    <button className="btn btn-secondary" onClick={() => { setEmailInput("arabisvi@gmail.com"); navigate('/login'); }}>
                       <LogIn size={16} />
                       <span>Log In</span>
                     </button>
-                    <button className="btn btn-primary" onClick={() => setCurrentView("signup")}>
+                    <button className="btn btn-primary" onClick={() => navigate('/signup')}>
                       <UserPlus size={16} />
                       <span>Sign Up</span>
                     </button>
                   </>
                 ) : (
-                  <button className="btn btn-secondary" onClick={() => setCurrentView("home")}>
+                  <button className="btn btn-secondary" onClick={() => navigate('/')}>
                     <ArrowLeft size={16} />
                     <span>Back to Home</span>
                   </button>
                 )}
               </>
             )}
+            <button
+              type="button"
+              className="btn btn-secondary theme-toggle-btn"
+              onClick={toggleColorTheme}
+              aria-label={colorTheme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+              title={colorTheme === 'dark' ? 'Light mode' : 'Dark mode'}
+            >
+              {colorTheme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+            </button>
           </div>
         </div>
       </header>
 
       <main className="main-content">
-        {currentView === "home" ? (
+        {isHome && (
           <>
             {/* Hero Section */}
             <section id="concept" className="hero-section">
               <div className="container">
-                <div className="badge">
-                  <span className="badge-dot"></span>
-                  <span>Project Vision & Roadmap</span>
-                </div>
                 <h1 className="hero-title">Secure Workspace for <span className="gradient-text">Academic Documents</span></h1>
                 <p className="hero-subtitle">
-                  Centralizing scattered classwork, administrative resources, and timelines. React components built to support the high scale load of educational institutions.
+                  One school library for classwork, lab sheets, and administrative circulars—organized by institution, academic year, class, subject, and term.
                 </p>
                 
                 <div className="hero-search-wrapper">
@@ -1094,17 +1239,17 @@ function App() {
                       placeholder="Quickly search files (e.g. Physics, Lab Report)..." 
                       value={searchQuery}
                       onChange={(e) => setSearchQuery(e.target.value)}
-                      onFocus={() => document.getElementById('workspace')?.scrollIntoView({ behavior: 'smooth' })}
+                      onFocus={() => { if (requireAuth()) document.getElementById('workspace')?.scrollIntoView({ behavior: 'smooth' }); }}
                     />
                   </div>
                 </div>
 
                 <div className="hero-buttons">
-                  <button className="btn btn-primary btn-lg" onClick={() => setCurrentView("workspace")}>
+                  <button className="btn btn-primary btn-lg" onClick={openWorkspace}>
                     <span>Launch EduVault Workspace</span>
                     <ArrowRight size={18} />
                   </button>
-                  <button className="btn btn-secondary btn-lg" onClick={() => document.getElementById('roadmap')?.scrollIntoView({ behavior: 'smooth' })}>
+                  <button className="btn btn-secondary btn-lg" onClick={scrollToRoadmap}>
                     <span>View R&D Roadmap</span>
                   </button>
                 </div>
@@ -1117,6 +1262,7 @@ function App() {
                 <div className="section-header">
                   <h2>Interactive Workspace Preview</h2>
                   <p>Experience how EduVault structures files organically by institution, year, class, subject, and timeline.</p>
+                  <p className="demo-context-line" data-testid="home-demo-context">{getBreadcrumb()}</p>
                 </div>
 
                 <div className="workspace-card">
@@ -1157,6 +1303,7 @@ function App() {
                         <option value="physics">Physics</option>
                         <option value="mathematics">Mathematics</option>
                         <option value="chemistry">Chemistry</option>
+                        <option value="biology">Biology</option>
                         <option value="english">English Literature</option>
                       </select>
                     </div>
@@ -1183,7 +1330,7 @@ function App() {
                         />
                       </div>
                       <div className="upload-zone-wrapper">
-                        <button className="btn btn-primary" onClick={() => fileInputRef.current.click()}>
+                        <button type="button" className="btn btn-primary" onClick={() => { if (requireAuth()) fileInputRef.current?.click(); }}>
                           <UploadCloud />
                           <span>Upload Document</span>
                         </button>
@@ -1192,6 +1339,10 @@ function App() {
                           ref={fileInputRef} 
                           style={{ display: 'none' }} 
                           onChange={(e) => {
+                            if (!requireAuth()) {
+                              e.target.value = null;
+                              return;
+                            }
                             const file = e.target.files[0];
                             if (!file) return;
                             const newDoc = {
@@ -1228,12 +1379,10 @@ function App() {
                         </div>
                       ) : (
                         filteredDocs.map(doc => (
-                          <div key={doc.id} className="doc-card" onClick={() => showToast(`Opening: ${doc.title}`)}>
-                            <div className={`doc-icon-wrapper ${doc.type}`}>
-                              {getDocIcon(doc.type)}
-                            </div>
+                          <div key={doc.id} className="doc-card" onClick={() => { if (requireAuth()) showToast(`Opening: ${doc.title}`); }}>
                             <div className="doc-title" title={doc.title}>{doc.title}</div>
                             <div className="doc-details">
+                              <span className="doc-tag">{formatDocMetaLine(doc)}</span>
                               <span className="doc-tag">{doc.type.toUpperCase()}</span>
                               <span>{doc.size}</span>
                             </div>
@@ -1251,7 +1400,7 @@ function App() {
               <div className="container">
                 <div className="section-header">
                   <h2>Research & Development Roadmap</h2>
-                  <p>Our phased journey to designing and deploying the next generation of secure educational file systems.</p>
+                  <p>Phased build plan for EduVault—each step adds capability on the same library your school uses today.</p>
                 </div>
 
                 <div className="roadmap-timeline">
@@ -1262,7 +1411,7 @@ function App() {
                         <h3>Architecture & Multi-Tenancy</h3>
                         <span className="phase-status status-active">In Progress</span>
                       </div>
-                      <p>Designing the database schema for highly isolated multi-tenancy. Setting up dynamic metadata nodes linking documents to academic years, institutions, and classes.</p>
+                      <p>Isolate each school’s data and tie every file to year, class, and institution metadata.</p>
                       <ul className="phase-bullets">
                         <li><CheckCircle className="check" size={16} /> <span>Multi-tenant data partition layouts</span></li>
                         <li><CheckCircle className="check" size={16} /> <span>Structured folder mapping schemas</span></li>
@@ -1278,7 +1427,7 @@ function App() {
                         <h3>Identity & Granular Access</h3>
                         <span className="phase-status">Q4 2026</span>
                       </div>
-                      <p>Implementing security policies where teachers can publish, administrators can audit, and parents/students can only view designated timelines.</p>
+                      <p>Teachers publish, admins audit, and families see only the terms they are allowed to view.</p>
                       <ul className="phase-bullets">
                         <li><Circle className="pending" size={16} /> <span>Granular role-based access control (RBAC)</span></li>
                         <li><Circle className="pending" size={16} /> <span>Single-sign-on (SSO) for schools</span></li>
@@ -1294,7 +1443,7 @@ function App() {
                         <h3>Distributed File Store & CDN</h3>
                         <span className="phase-status">Q1 2027</span>
                       </div>
-                      <p>Integrating distributed storage services to handle large volumes of scanned assignments, exam papers, and educational videos with rapid local delivery.</p>
+                      <p>Store scans, exam papers, and video lessons with fast downloads from the edge.</p>
                       <ul className="phase-bullets">
                         <li><Circle className="pending" size={16} /> <span>High-performance object storage bindings</span></li>
                         <li><Circle className="pending" size={16} /> <span>Edge caching for resource downloads</span></li>
@@ -1310,7 +1459,7 @@ function App() {
                         <h3>AI Auto-Categorization & Search</h3>
                         <span className="phase-status">Q2 2027</span>
                       </div>
-                      <p>Utilizing semantic search and OCR models to automatically scan uploaded worksheets, extract text, and index files into their respective classes/timeline nodes.</p>
+                      <p>OCR and semantic search auto-tag uploads into the right class and term.</p>
                       <ul className="phase-bullets">
                         <li><Circle className="pending" size={16} /> <span>Intelligent PDF OCR extraction</span></li>
                         <li><Circle className="pending" size={16} /> <span>Auto-tagging suggestions based on contents</span></li>
@@ -1322,10 +1471,8 @@ function App() {
               </div>
             </section>
           </>
-        ) : currentView === "workspace" ? (
-          /* ==========================================================================
-             EDUVAULT DRIVE WORKSPACE (DRIVE-INSPIRED INTERFACE)
-             ========================================================================== */
+        )}
+        {isWorkspace && (
           <div className="gdrive-layout">
             {/* Left Sidebar */}
             <aside className="gdrive-sidebar">
@@ -1377,19 +1524,19 @@ function App() {
               {/* Sidebar Navigation Links */}
               <nav className="gdrive-nav-list">
                 <button 
+                  className={`gdrive-nav-item ${selectedNav === 'classes' && activeFolderId === null ? 'active' : ''}`}
+                  onClick={() => { setSelectedNav('classes'); setActiveFolderId(null); }}
+                >
+                  <School size={18} />
+                  <span>Classes & Subjects</span>
+                </button>
+
+                <button 
                   className={`gdrive-nav-item ${selectedNav === 'home' && activeFolderId === null ? 'active' : ''}`}
                   onClick={() => { setSelectedNav('home'); setActiveFolderId(null); }}
                 >
                   <Home size={18} />
                   <span>Home</span>
-                </button>
-
-                <button 
-                  className={`gdrive-nav-item ${selectedNav === 'classes' ? 'active' : ''}`}
-                  onClick={() => { setSelectedNav('classes'); setActiveFolderId(null); }}
-                >
-                  <School size={18} />
-                  <span>Classes & Subjects</span>
                 </button>
 
                 <button 
@@ -1453,8 +1600,8 @@ function App() {
                     <Cloud size={16} />
                   </div>
                   <div className="storage-card-title-group">
-                    <span className="storage-card-label">Vault Storage</span>
-                    <span className="storage-card-plan">Institution Pro</span>
+                    <span className="storage-card-label">School library</span>
+                    <span className="storage-card-plan">Institution quota</span>
                   </div>
                   <span className="storage-card-percent">14%</span>
                 </div>
@@ -1466,17 +1613,10 @@ function App() {
                 </div>
 
                 <div className="storage-stats-row">
-                  <span className="storage-stat-main">14.2 GB of 100 GB used</span>
+                  <span className="storage-stat-main">14.2 GB of 100 GB library used</span>
                   <span className="storage-stat-sub">85.8 GB free</span>
                 </div>
 
-                <button 
-                  className="eduvault-upgrade-storage-btn" 
-                  onClick={() => showToast("EduVault Academic Cloud: 100 GB Tier Active", "info")}
-                >
-                  <Sparkles size={14} className="upgrade-sparkle-icon" />
-                  <span>Get more storage</span>
-                </button>
               </div>
             </aside>
 
@@ -1498,6 +1638,8 @@ function App() {
                     </button>
                   )}
                 </div>
+
+                {renderAcademicFilterSelects('workspace-academic-filters')}
 
                 {/* Custom Filter Toolbar */}
                 <div className="gdrive-filter-chips">
@@ -1556,13 +1698,13 @@ function App() {
                           <span>Back</span>
                         </button>
                         <div className="folder-breadcrumbs">
-                          <span className="crumb-link" onClick={() => setActiveFolderId(null)}>EduVault Drive</span>
+                          <span className="crumb-link" onClick={() => setActiveFolderId(null)}>{getBreadcrumb()}</span>
                           <ChevronRight size={16} className="crumb-sep" />
                           <span className="crumb-active">{folders.find(f => f.id === activeFolderId)?.name || 'Folder'}</span>
                         </div>
                       </div>
                     ) : (
-                      <h1 className="gdrive-title">Welcome to EduVault Drive</h1>
+                      <h1 className="gdrive-title" data-testid="workspace-context-title">{getBreadcrumb()}</h1>
                     )}
                   </div>
                   <button className="gdrive-info-btn" title="View details" onClick={() => showToast("EduVault Academic Workspace v2.4", "info")}>
@@ -1635,7 +1777,7 @@ function App() {
                             </div>
                             <div className="folder-text-meta">
                               <div className="folder-main-title" title={folder.name}>{folder.name}</div>
-                              <div className="folder-sub-path">{folder.path || 'in EduVault Drive'}</div>
+                              <div className="folder-sub-path">{folder.path || getFolderContextPath()}</div>
                             </div>
                             
                             {/* Folder 3-dots Menu */}
@@ -2015,21 +2157,21 @@ function App() {
               </div>
             </main>
           </div>
-        ) : (
-          /* Authentication Screen */
+        )}
+        {(isLogin || isSignup) && (
           <section className="auth-section">
             <div className="auth-card">
               <div className="auth-card-header">
-                <h2>{currentView === "login" ? "Welcome Back" : "Create Account"}</h2>
+                <h2>{isLogin ? "Welcome Back" : "Create Account"}</h2>
                 <p>
-                  {currentView === "login" 
+                  {isLogin
                     ? "Access your secure academic vault workspace" 
                     : "Register your institution with EduVault"}
                 </p>
               </div>
 
               <form onSubmit={handleAuthSubmit} className="auth-form">
-                {currentView === "signup" && (
+                {isSignup && (
                   <>
                     <div className="form-group">
                       <label htmlFor="fullname">Full Name</label>
@@ -2093,20 +2235,20 @@ function App() {
                 </div>
 
                 <button type="submit" className="btn btn-primary btn-block">
-                  {currentView === "login" ? "Log In" : "Sign Up"}
+                  {isLogin ? "Log In" : "Sign Up"}
                 </button>
               </form>
 
               <div className="auth-card-footer">
-                {currentView === "login" ? (
+                {isLogin ? (
                   <p>
                     New to EduVault?{' '}
-                    <span onClick={() => { setCurrentView("signup"); setEmailInput(""); }}>Create an account</span>
+                    <span onClick={() => { setEmailInput(""); navigate('/signup'); }}>Create an account</span>
                   </p>
                 ) : (
                   <p>
                     Already have an account?{' '}
-                    <span onClick={() => { setCurrentView("login"); setEmailInput("arabisvi@gmail.com"); }}>Log in instead</span>
+                    <span onClick={() => { setEmailInput("arabisvi@gmail.com"); navigate('/login'); }}>Log in instead</span>
                   </p>
                 )}
               </div>
@@ -2380,19 +2522,14 @@ function App() {
       )}
 
       {/* Global Footer (only for non-workspace view) */}
-      {currentView !== "workspace" && (
+      {!isWorkspace && (
         <footer className="main-footer">
           <div className="container">
-            <p>&copy; 2026 EduVault. All rights reserved. Secure Digital Workspace Visionary.</p>
+            <p>&copy; 2026 EduVault. All rights reserved.</p>
           </div>
         </footer>
       )}
 
-      {/* Notification Toast */}
-      <div className={`toast ${toast.show ? 'show' : ''}`}>
-        {getToastIcon(toast.icon)}
-        <span>{toast.message}</span>
-      </div>
     </div>
   );
 }
