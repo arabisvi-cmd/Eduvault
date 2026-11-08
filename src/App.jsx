@@ -8,7 +8,7 @@ import {
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, X, Check, Sun, Moon,
   Share2, FolderInput, Copy, Pencil, ExternalLink,
-  User, Settings, LogOut
+  User, Settings, LogOut, PanelLeft, PanelLeftClose
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -314,12 +314,27 @@ const FILTER_DEFINITIONS = {
   }
 };
 
+const USER_TYPE_LABELS = {
+  admin: 'Admin',
+  teacher: 'Teacher',
+  student: 'Student',
+  non_teaching_staff: 'Non teaching staff',
+};
+
+function formatUserTypeLabel(userType) {
+  if (!userType) return USER_TYPE_LABELS.student;
+  const key = String(userType).trim().toLowerCase().replace(/\s+/g, '_');
+  if (USER_TYPE_LABELS[key]) return USER_TYPE_LABELS[key];
+  return String(userType).trim();
+}
+
 function sessionFromApiUser(user, fallbackEmail = '', fallbackName = '') {
   const email = (user?.email || fallbackEmail || '').trim();
   if (!email) return null;
   const full_name = (user?.full_name || fallbackName || '').trim();
   const profile_image = user?.profile_image || '';
-  return { email, full_name, profile_image };
+  const user_type = user?.user_type || 'student';
+  return { email, full_name, profile_image, user_type };
 }
 
 function UserAvatar({ user, className = '', size = 16 }) {
@@ -422,12 +437,13 @@ function App() {
   }
 
   // Workspace specific states
-  const [selectedNav, setSelectedNav] = useState("classes"); // 'home', 'classes', 'my-vault', 'shared', 'recent', 'starred', 'trash', 'storage'
+  const [selectedNav, setSelectedNav] = useState("home"); // 'home', 'my-vault', 'shared', 'recent', 'starred', 'trash'
   const [workspaceViewMode, setWorkspaceViewMode] = useState("grid"); // 'grid' | 'list'
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const [suggestedFoldersOpen, setSuggestedFoldersOpen] = useState(true);
   const [suggestedFilesOpen, setSuggestedFilesOpen] = useState(true);
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
+  const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true);
   
   // Custom User Filters
   const [customFilters, setCustomFilters] = useState([]);
@@ -885,6 +901,26 @@ function App() {
     setCustomFilters(customFilters.filter(f => f.id !== id));
   };
 
+  const documentFiltersAreActive =
+    filterInst !== 'all' ||
+    filterClass !== 'all' ||
+    filterSubject !== 'all' ||
+    filterTimeline !== 'all' ||
+    customFilters.length > 0 ||
+    workspaceSearchQuery.trim() !== '' ||
+    searchQuery.trim() !== '';
+
+  const clearDocumentFilters = () => {
+    setFilterInst('all');
+    setFilterClass('all');
+    setFilterSubject('all');
+    setFilterTimeline('all');
+    setCustomFilters([]);
+    setWorkspaceSearchQuery('');
+    setSearchQuery('');
+    showToast('Filters cleared', 'info');
+  };
+
   const handleDeleteFolder = (folderId, folderName, e) => {
     if (e) e.stopPropagation();
     setFolders(folders.filter(f => f.id !== folderId));
@@ -1025,6 +1061,7 @@ function App() {
         email: user.email,
         full_name: user.full_name || '',
         profile_image: user.profile_image || '',
+        user_type: user.user_type || 'student',
       }));
     } catch { /* ignored */ }
   };
@@ -1388,7 +1425,7 @@ function App() {
                   scrollToRoadmap();
                 }}
               >
-                R&D Roadmap
+                Features
               </a>
               <a
                 href="/workspace"
@@ -1399,14 +1436,6 @@ function App() {
               >
                 Workspace
               </a>
-            </nav>
-          )}
-          {isWorkspace && (
-            <nav className="nav-links workspace-header-nav">
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => navigate('/')}>
-                <ArrowLeft size={16} />
-                <span>Back to overview</span>
-              </button>
             </nav>
           )}
           <div className="header-actions">
@@ -1575,6 +1604,14 @@ function App() {
                         <option value="term-2">Term 2 (Finals)</option>
                       </select>
                     </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm clear-filters-btn"
+                      onClick={clearDocumentFilters}
+                      disabled={!documentFiltersAreActive}
+                    >
+                      Clear filters
+                    </button>
                   </aside>
 
                   {/* Main Workspace Area */}
@@ -1659,18 +1696,13 @@ function App() {
             <section id="roadmap" className="roadmap-section">
               <div className="container">
                 <div className="section-header">
-                  <h2>Research & Development Roadmap</h2>
-                  <p>Phased build plan for EduVault—each step adds capability on the same library your school uses today.</p>
+                  <h2>Features</h2>
                 </div>
 
                 <div className="roadmap-timeline">
                   <div className="roadmap-item active">
-                    <div className="phase-number">Phase 1</div>
                     <div className="roadmap-card">
-                      <div className="card-header">
-                        <h3>Architecture & Multi-Tenancy</h3>
-                        <span className="phase-status status-active">In Progress</span>
-                      </div>
+                      <h3>Architecture & Multi-Tenancy</h3>
                       <p>Isolate each school’s data and tie every file to year, class, and institution metadata.</p>
                       <ul className="phase-bullets">
                         <li><CheckCircle className="check" size={16} /> <span>Multi-tenant data partition layouts</span></li>
@@ -1681,12 +1713,8 @@ function App() {
                   </div>
 
                   <div className="roadmap-item">
-                    <div className="phase-number">Phase 2</div>
                     <div className="roadmap-card">
-                      <div className="card-header">
-                        <h3>Identity & Granular Access</h3>
-                        <span className="phase-status">Q4 2026</span>
-                      </div>
+                      <h3>Identity & Granular Access</h3>
                       <p>Teachers publish, admins audit, and families see only the terms they are allowed to view.</p>
                       <ul className="phase-bullets">
                         <li><Circle className="pending" size={16} /> <span>Granular role-based access control (RBAC)</span></li>
@@ -1697,12 +1725,8 @@ function App() {
                   </div>
 
                   <div className="roadmap-item">
-                    <div className="phase-number">Phase 3</div>
                     <div className="roadmap-card">
-                      <div className="card-header">
-                        <h3>Distributed File Store & CDN</h3>
-                        <span className="phase-status">Q1 2027</span>
-                      </div>
+                      <h3>Distributed File Store & CDN</h3>
                       <p>Store scans, exam papers, and video lessons with fast downloads from the edge.</p>
                       <ul className="phase-bullets">
                         <li><Circle className="pending" size={16} /> <span>High-performance object storage bindings</span></li>
@@ -1713,12 +1737,8 @@ function App() {
                   </div>
 
                   <div className="roadmap-item">
-                    <div className="phase-number">Phase 4</div>
                     <div className="roadmap-card">
-                      <div className="card-header">
-                        <h3>AI Auto-Categorization & Search</h3>
-                        <span className="phase-status">Q2 2027</span>
-                      </div>
+                      <h3>AI Auto-Categorization & Search</h3>
                       <p>OCR and semantic search auto-tag uploads into the right class and term.</p>
                       <ul className="phase-bullets">
                         <li><Circle className="pending" size={16} /> <span>Intelligent PDF OCR extraction</span></li>
@@ -1735,16 +1755,28 @@ function App() {
         {isWorkspace && (
           <div className="gdrive-layout">
             {/* Left Sidebar */}
-            <aside className="gdrive-sidebar">
+            <aside className={`gdrive-sidebar${workspaceSidebarOpen ? '' : ' is-collapsed'}`}>
               {/* + New Button with Dropdown */}
               <div className="gdrive-new-wrapper" ref={newDropdownRef}>
-                <button 
-                  className="gdrive-new-btn" 
-                  onClick={() => setShowNewDropdown(!showNewDropdown)}
-                >
-                  <Plus size={22} className="gdrive-plus-icon" />
-                  <span>New</span>
-                </button>
+                <div className="gdrive-sidebar-new-row">
+                  <button 
+                    className="gdrive-new-btn" 
+                    onClick={() => setShowNewDropdown(!showNewDropdown)}
+                  >
+                    <Plus size={22} className="gdrive-plus-icon" />
+                    <span>New</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="gdrive-sidebar-toggle"
+                    onClick={() => setWorkspaceSidebarOpen(false)}
+                    aria-expanded={workspaceSidebarOpen}
+                    aria-label="Hide sidebar"
+                    title="Hide sidebar"
+                  >
+                    <PanelLeftClose size={20} />
+                  </button>
+                </div>
 
                 {showNewDropdown && (
                   <div className="gdrive-new-dropdown">
@@ -1783,14 +1815,6 @@ function App() {
 
               {/* Sidebar Navigation Links */}
               <nav className="gdrive-nav-list">
-                <button 
-                  className={`gdrive-nav-item ${selectedNav === 'classes' && activeFolderId === null ? 'active' : ''}`}
-                  onClick={() => { setSelectedNav('classes'); setActiveFolderId(null); }}
-                >
-                  <School size={18} />
-                  <span>Classes & Subjects</span>
-                </button>
-
                 <button 
                   className={`gdrive-nav-item ${selectedNav === 'home' && activeFolderId === null ? 'active' : ''}`}
                   onClick={() => { setSelectedNav('home'); setActiveFolderId(null); }}
@@ -1843,14 +1867,6 @@ function App() {
                   <Trash2 size={18} />
                   <span>Trash</span>
                 </button>
-
-                <button 
-                  className={`gdrive-nav-item ${selectedNav === 'storage' ? 'active' : ''}`}
-                  onClick={() => { setSelectedNav('storage'); setActiveFolderId(null); }}
-                >
-                  <Cloud size={18} />
-                  <span>Storage</span>
-                </button>
               </nav>
 
               {/* Custom EduVault Storage Card */}
@@ -1884,22 +1900,53 @@ function App() {
             <main className="gdrive-main-pane">
               {/* Workspace Top Search & Filter Bar */}
               <div className="gdrive-top-bar">
-                <div className="gdrive-search-input-wrapper">
-                  <Search size={18} className="gdrive-search-icon" />
-                  <input 
-                    type="text" 
-                    placeholder="Search documents, lectures, lab reports..."
-                    value={workspaceSearchQuery}
-                    onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
-                  />
-                  {workspaceSearchQuery && (
-                    <button className="clear-search-btn" onClick={() => setWorkspaceSearchQuery("")}>
-                      <X size={16} />
+                <div className="gdrive-top-bar-search-row">
+                  {!workspaceSidebarOpen && (
+                    <button
+                      type="button"
+                      className="gdrive-sidebar-toggle gdrive-sidebar-reopen-btn"
+                      onClick={() => setWorkspaceSidebarOpen(true)}
+                      aria-label="Show sidebar"
+                      title="Show sidebar"
+                    >
+                      <PanelLeft size={20} />
                     </button>
                   )}
+                  <div className="gdrive-search-input-wrapper">
+                    <Search size={18} className="gdrive-search-icon" />
+                    <input 
+                      type="text" 
+                      placeholder="Search documents, lectures, lab reports..."
+                      value={workspaceSearchQuery}
+                      onChange={(e) => setWorkspaceSearchQuery(e.target.value)}
+                    />
+                    {workspaceSearchQuery && (
+                      <button className="clear-search-btn" onClick={() => setWorkspaceSearchQuery("")}>
+                        <X size={16} />
+                      </button>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm workspace-back-btn"
+                    onClick={() => navigate('/')}
+                  >
+                    <ArrowLeft size={16} />
+                    <span>Back to overview</span>
+                  </button>
                 </div>
 
-                {renderAcademicFilterSelects('workspace-academic-filters')}
+                <div className="workspace-academic-filters-bar">
+                  {renderAcademicFilterSelects('workspace-academic-filters')}
+                  <button
+                    type="button"
+                    className="btn btn-secondary btn-sm clear-filters-btn"
+                    onClick={clearDocumentFilters}
+                    disabled={!documentFiltersAreActive}
+                  >
+                    Clear filters
+                  </button>
+                </div>
 
                 {/* Custom Filter Toolbar */}
                 <div className="gdrive-filter-chips">
@@ -1928,17 +1975,6 @@ function App() {
                     </div>
                   ))}
 
-                  {customFilters.length > 0 && (
-                    <button 
-                      className="clear-all-chips"
-                      onClick={() => {
-                        setCustomFilters([]);
-                        showToast("Cleared all custom filters", "info");
-                      }}
-                    >
-                      Clear all
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -2524,6 +2560,10 @@ function App() {
                   <div className="account-detail-row">
                     <dt>Email</dt>
                     <dd>{currentUser.email}</dd>
+                  </div>
+                  <div className="account-detail-row">
+                    <dt>User type</dt>
+                    <dd>{formatUserTypeLabel(currentUser.user_type)}</dd>
                   </div>
                 </dl>
               </div>

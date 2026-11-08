@@ -81,7 +81,22 @@ D1 is declared in `wrangler.toml` as binding **`DB`** → `eduvault-db`. After y
    **Deploy command:** `npx wrangler deploy`  
 4. Redeploy. The Worker (`worker/index.js`) serves **`/api/*`** (auth + documents); everything else is the Vite SPA from `dist/`.
 
-**Verify:** `curl -s -X POST 'https://<your-worker-url>/api/auth/signup' -H 'Content-Type: application/json' -d '{"email":"test@school.edu","password":"pass123","full_name":"Test","institution":"inst-1"}'` should return JSON `success: true`, then check D1 Console: `SELECT * FROM users;`.
+**Verify signup:** Add the email to the school roster first, then sign up:
+
+```sql
+INSERT OR IGNORE INTO user_directory (email, user_type, institution)
+VALUES ('test@school.edu', 'teacher', 'inst-1');
+```
+
+```bash
+curl -s -X POST 'https://<your-worker-url>/api/auth/signup' \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"test@school.edu","password":"pass123","full_name":"Test","institution":"inst-1"}'
+```
+
+Expect `success: true` and `user.user_type` of `teacher`. Check `SELECT * FROM users;`.
+
+Emails **not** in `user_directory` get **403** at signup — users never pick their own type; the roster assigns `admin`, `teacher`, `student`, or `non_teaching_staff`.
 
 ### Optional: Cloudflare Pages (instead of Worker deploy)
 

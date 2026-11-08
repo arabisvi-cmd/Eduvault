@@ -321,9 +321,8 @@ describe('EduVault App Rendering & Navigation tests', () => {
     // Verify active custom chip appears
     expect(screen.getAllByText(/Class \/ Grade: Grade 10/i)[0]).toBeInTheDocument();
 
-    // Verify Clear all button appears and resets filters
-    const clearAllBtn = screen.getByRole('button', { name: /Clear all/i });
-    fireEvent.click(clearAllBtn);
+    const clearFiltersBtn = screen.getByRole('button', { name: /Clear filters/i });
+    fireEvent.click(clearFiltersBtn);
     expect(screen.queryByText(/Class \/ Grade: Grade 10/i)).not.toBeInTheDocument();
   });
 });

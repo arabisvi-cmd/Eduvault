@@ -10,6 +10,13 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+const ALLOWED_USER_TYPES = new Set(['admin', 'teacher', 'student', 'non_teaching_staff']);
+
+function normalizeUserType(value) {
+  const key = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
+  return ALLOWED_USER_TYPES.has(key) ? key : null;
+}
+
 function publicUser(row) {
   return {
     id: row.id,
@@ -17,7 +24,14 @@ function publicUser(row) {
     full_name: row.full_name,
     institution: row.institution,
     profile_image: row.profile_image || '',
+    user_type: row.user_type || 'student',
   };
+}
+
+async function lookupDirectoryUser(env, email) {
+  return env.DB.prepare(
+    'SELECT email, user_type, institution FROM user_directory WHERE email = ?'
+  ).bind(email.toLowerCase()).first();
 }
 
 async function hashPassword(password, saltHex = null) {
@@ -111,26 +125,42 @@ export async function handleApi(request, env) {
         return jsonResponse({ error: 'Email and password are required' }, 400);
       }
 
-      const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(email.toLowerCase()).first();
+      const normalizedEmail = email.toLowerCase().trim();
+      const existing = await env.DB.prepare('SELECT id FROM users WHERE email = ?').bind(normalizedEmail).first();
       if (existing) {
         return jsonResponse({ error: 'User already exists' }, 409);
       }
+
+      const directoryEntry = await lookupDirectoryUser(env, normalizedEmail);
+      if (!directoryEntry) {
+        return jsonResponse({
+          error: 'This email is not on your school roster. Contact an administrator to be added before signing up.',
+        }, 403);
+      }
+
+      const userType = normalizeUserType(directoryEntry.user_type);
+      if (!userType) {
+        return jsonResponse({ error: 'Roster entry has an invalid user type. Contact an administrator.' }, 500);
+      }
+
+      const rosterInstitution = directoryEntry.institution || institution || '';
 
       const { hash, salt } = await hashPassword(password);
       const userId = `usr_${Date.now()}`;
 
       await env.DB.prepare(
-        'INSERT INTO users (id, email, password_hash, salt, full_name, institution) VALUES (?, ?, ?, ?, ?, ?)'
-      ).bind(userId, email.toLowerCase(), hash, salt, full_name || '', institution || '').run();
+        'INSERT INTO users (id, email, password_hash, salt, full_name, institution, user_type) VALUES (?, ?, ?, ?, ?, ?, ?)'
+      ).bind(userId, normalizedEmail, hash, salt, full_name || '', rosterInstitution, userType).run();
 
       return jsonResponse({
         success: true,
         user: {
           id: userId,
-          email: email.toLowerCase(),
+          email: normalizedEmail,
           full_name,
-          institution,
+          institution: rosterInstitution,
           profile_image: '',
+          user_type: userType,
         }
       });
     }

@@ -9,10 +9,13 @@ CREATE TABLE IF NOT EXISTS users (
     full_name TEXT,
     institution TEXT,
     profile_image TEXT,
+    user_type TEXT DEFAULT 'student',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- Existing databases: ALTER TABLE users ADD COLUMN profile_image TEXT;
+-- Existing databases:
+-- ALTER TABLE users ADD COLUMN profile_image TEXT;
+-- ALTER TABLE users ADD COLUMN user_type TEXT DEFAULT 'student';
 
 CREATE TABLE IF NOT EXISTS documents (
     id TEXT PRIMARY KEY,
@@ -33,4 +36,21 @@ CREATE TABLE IF NOT EXISTS documents (
 
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+
+-- School roster: only emails listed here may register; user_type is assigned at signup (never self-selected).
+CREATE TABLE IF NOT EXISTS user_directory (
+    email TEXT PRIMARY KEY,
+    user_type TEXT NOT NULL,
+    institution TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_user_directory_type ON user_directory(user_type);
+
+-- Example roster rows (adjust for your school):
+-- INSERT OR IGNORE INTO user_directory (email, user_type, institution) VALUES
+--   ('admin@school.edu', 'admin', 'inst-1'),
+--   ('teacher@school.edu', 'teacher', 'inst-1'),
+--   ('student@school.edu', 'student', 'inst-1'),
+--   ('registrar@school.edu', 'non_teaching_staff', 'inst-1');
 
