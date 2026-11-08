@@ -1345,6 +1345,19 @@ html[data-theme="light"] .account-delete-btn {
     pointer-events: auto;
 }
 
+.user-account-menu.is-dismissed .user-account-dropdown,
+.user-account-menu.is-dismissed:hover .user-account-dropdown,
+.user-account-menu.is-dismissed:focus-within .user-account-dropdown {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(4px);
+    pointer-events: none;
+}
+
+.user-account-menu.is-dismissed .user-account-chevron {
+    transform: rotate(0deg);
+}
+
 .user-account-dropdown .dropdown-item svg {
     flex-shrink: 0;
     color: var(--text-secondary);
@@ -1360,6 +1373,89 @@ html[data-theme="light"] .account-delete-btn {
 
 html[data-theme="light"] .user-account-signout:hover {
     color: #dc2626;
+}
+
+.user-account-submenu-wrap {
+    position: relative;
+}
+
+.user-view-as-trigger {
+    justify-content: flex-start;
+    width: 100%;
+}
+
+.user-view-as-chevron {
+    margin-left: auto;
+    opacity: 0.65;
+    transition: transform 0.18s ease;
+}
+
+.user-account-submenu-wrap.is-open .user-view-as-chevron {
+    transform: rotate(180deg);
+}
+
+.user-account-submenu {
+    display: none;
+    padding: 0.15rem 0 0.35rem;
+    margin: 0 0.35rem 0.15rem;
+    border-left: 2px solid rgba(59, 130, 246, 0.35);
+}
+
+.user-account-submenu-wrap.is-open .user-account-submenu,
+.user-account-submenu-wrap:focus-within .user-account-submenu {
+    display: block;
+}
+
+.user-view-as-option {
+    padding-left: 1.25rem;
+    font-size: 0.88rem;
+}
+
+.user-view-as-option.active {
+    color: var(--accent-link);
+    font-weight: 600;
+}
+
+.user-view-as-option-spacer {
+    display: inline-block;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+}
+
+.view-as-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.65rem 1rem;
+    padding: 0.45rem 1rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    background: rgba(59, 130, 246, 0.12);
+    border-bottom: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+.view-as-banner strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.view-as-banner-exit {
+    border: 1px solid var(--border-color);
+    background: var(--btn-secondary-bg);
+    color: var(--text-primary);
+    border-radius: 6px;
+    padding: 0.2rem 0.65rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: var(--font-body);
+}
+
+.view-as-banner-exit:hover {
+    border-color: rgba(59, 130, 246, 0.45);
+    color: var(--accent-link);
 }
 
 /* Hero Search Bar Styles */
@@ -1771,6 +1867,16 @@ html[data-theme="light"] .user-account-signout:hover {
     min-width: 0;
 }
 
+.workspace-readonly-notice {
+    margin: 0;
+    padding: 0.45rem 0.85rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+    background: rgba(148, 163, 184, 0.12);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+}
+
 /* Top Bar: Search & Filter Chips */
 .gdrive-top-bar {
     display: flex;
@@ -2075,25 +2181,6 @@ html[data-theme="light"] .user-account-signout:hover {
 }
 
 .crumb-active {
-    color: var(--text-primary);
-}
-
-.gdrive-info-btn {
-    background: transparent;
-    border: none;
-    color: var(--text-secondary);
-    border-radius: 50%;
-    width: 36px;
-    height: 36px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
-}
-
-.gdrive-info-btn:hover {
-    background: var(--surface-control-hover);
     color: var(--text-primary);
 }
 

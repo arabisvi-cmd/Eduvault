@@ -8,7 +8,7 @@ import {
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, X, Check, Sun, Moon,
   Share2, FolderInput, Copy, Pencil, ExternalLink,
-  User, Settings, LogOut, PanelLeft, PanelLeftClose
+  User, Settings, LogOut, PanelLeft, PanelLeftClose, Eye
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase, isSupabaseConfigured } from './lib/supabase';
@@ -321,6 +321,30 @@ const USER_TYPE_LABELS = {
   non_teaching_staff: 'Non teaching staff',
 };
 
+const VIEW_AS_USER_TYPES = ['admin', 'teacher', 'non_teaching_staff', 'student'];
+
+function normalizeUserTypeKey(userType) {
+  return String(userType || 'student').trim().toLowerCase().replace(/\s+/g, '_');
+}
+
+function isAdminUser(user) {
+  return normalizeUserTypeKey(user?.user_type) === 'admin';
+}
+
+function getEffectiveUserType(user, viewAsType) {
+  if (!user) return 'student';
+  const actual = normalizeUserTypeKey(user.user_type);
+  if (isAdminUser(user) && viewAsType) {
+    return normalizeUserTypeKey(viewAsType);
+  }
+  return actual;
+}
+
+function canWriteWorkspace(user, viewAsType) {
+  const role = getEffectiveUserType(user, viewAsType);
+  return role === 'admin' || role === 'teacher';
+}
+
 function formatUserTypeLabel(userType) {
   if (!userType) return USER_TYPE_LABELS.student;
   const key = String(userType).trim().toLowerCase().replace(/\s+/g, '_');
@@ -394,7 +418,10 @@ function App() {
   const isSignup = location.pathname === '/signup';
   const isAccount = location.pathname === '/account';
 
-  const [currentUser, setCurrentUser] = useState(null); // { email, full_name }
+  const [currentUser, setCurrentUser] = useState(null); // { email, full_name, user_type }
+  const [viewAsUserType, setViewAsUserType] = useState(null); // admin preview: null => own admin view
+  const [viewAsMenuOpen, setViewAsMenuOpen] = useState(false);
+  const [accountMenuDismissed, setAccountMenuDismissed] = useState(false);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [pwdCurrent, setPwdCurrent] = useState("");
   const [pwdNew, setPwdNew] = useState("");
@@ -518,11 +545,35 @@ function App() {
   }, [isWorkspace, isAccount, currentUser, navigate, location]);
 
   useEffect(() => {
+    if (currentUser && isHome) {
+      navigate('/workspace', { replace: true });
+    }
+  }, [currentUser, isHome, navigate]);
+
+  useEffect(() => {
     if (isAccount && currentUser) {
       setAccountNameInput(currentUser.full_name || userDisplayName(currentUser));
       setIsEditingAccountName(false);
     }
   }, [isAccount, currentUser?.email, currentUser?.full_name]);
+
+  useEffect(() => {
+    if (getEffectiveUserType(currentUser, viewAsUserType) !== 'admin') {
+      setShowDeleteAccountConfirm(false);
+    }
+  }, [currentUser, viewAsUserType]);
+
+  useEffect(() => {
+    if (canWriteWorkspace(currentUser, viewAsUserType)) return;
+    setIsCreatingFolder(false);
+    setShowNewDropdown(false);
+    setRenamingDoc(null);
+    setRenamingFolder(null);
+    setMovingDoc(null);
+    setSharingDoc(null);
+    setSharingFolder(null);
+    if (selectedNav === 'trash') setSelectedNav('home');
+  }, [currentUser, viewAsUserType, selectedNav]);
 
   useEffect(() => {
     const target = location.state?.scrollTo;
@@ -554,6 +605,9 @@ function App() {
       }
       if (!event.target.closest('.folder-menu-wrapper')) {
         setActiveMenuFolderId(null);
+      }
+      if (!event.target.closest('.user-account-submenu-wrap')) {
+        setViewAsMenuOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -740,6 +794,11 @@ function App() {
       e.target.value = null;
       return;
     }
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) {
+      e.target.value = null;
+      showToast('You have read-only access in the workspace', 'info');
+      return;
+    }
     const file = e.target.files[0];
     if (!file) return;
 
@@ -833,6 +892,7 @@ function App() {
 
   const handleCreateFolder = (e) => {
     if (e) e.preventDefault();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     if (!newFolderName.trim()) {
       setIsCreatingFolder(false);
       return;
@@ -853,11 +913,13 @@ function App() {
 
   const handleDeleteDocument = (id, title, e) => {
     if (e) e.stopPropagation();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     setDocuments(documents.filter(doc => doc.id !== id));
     showToast(`Removed "${title}"`, "info");
   };
 
   const handleToggleStar = (docId) => {
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     setDocuments(documents.map(doc => {
       if (doc.id === docId) {
         const nextStarred = !doc.starred;
@@ -869,6 +931,7 @@ function App() {
   };
 
   const handleMakeCopy = (doc) => {
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     const today = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const copyDoc = {
       ...doc,
@@ -923,13 +986,27 @@ function App() {
 
   const handleDeleteFolder = (folderId, folderName, e) => {
     if (e) e.stopPropagation();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     setFolders(folders.filter(f => f.id !== folderId));
     showToast(`Removed folder "${folderName}"`, "info");
     setActiveMenuFolderId(null);
   };
 
+  const handleRenameSubmit = (e) => {
+    e.preventDefault();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
+    if (!renamingDoc || !renameInputVal.trim()) return;
+    setDocuments(documents.map((d) => (
+      d.id === renamingDoc.id ? { ...d, title: renameInputVal.trim() } : d
+    )));
+    showToast(`Renamed to "${renameInputVal.trim()}"`, 'check-circle');
+    setRenamingDoc(null);
+    setRenameInputVal('');
+  };
+
   const handleRenameFolderSubmit = (e) => {
     e.preventDefault();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     if (!renamingFolder || !renameFolderInputVal.trim()) return;
     setFolders(folders.map(f => f.id === renamingFolder.id ? { ...f, name: renameFolderInputVal.trim() } : f));
     showToast(`Renamed folder to "${renameFolderInputVal.trim()}"`, "check-circle");
@@ -939,10 +1016,10 @@ function App() {
 
   const goAfterAuth = () => {
     const from = location.state?.from?.pathname;
-    if (from && from !== '/login' && from !== '/signup') {
+    if (from && from !== '/login' && from !== '/signup' && from !== '/') {
       navigate(from, { replace: true });
     } else {
-      navigate('/', { replace: true });
+      navigate('/workspace', { replace: true });
     }
   };
 
@@ -1003,7 +1080,11 @@ function App() {
             return;
           }
           setCurrentUser(sessionFromApiUser(
-            { email: data.user?.email, full_name: data.user?.user_metadata?.full_name },
+            {
+              email: data.user?.email,
+              full_name: data.user?.user_metadata?.full_name,
+              user_type: data.user?.user_metadata?.user_type,
+            },
             emailInput
           ));
         } else if (isSignup) {
@@ -1194,6 +1275,7 @@ function App() {
       setShowDeleteAccountConfirm(false);
       setDeleteAccountPassword("");
       setCurrentUser(null);
+      setViewAsUserType(null);
       if (isSupabaseConfigured && supabase) {
         try {
           await supabase.auth.signOut();
@@ -1221,8 +1303,23 @@ function App() {
       }
     }
     setCurrentUser(null);
+    setViewAsUserType(null);
     showToast("Logged out successfully", "info");
     navigate('/');
+  };
+
+  const handleViewAsSelect = (typeKey) => {
+    if (typeKey === 'admin') {
+      setViewAsUserType(null);
+    } else {
+      setViewAsUserType(typeKey);
+    }
+    setViewAsMenuOpen(false);
+    setAccountMenuDismissed(true);
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur();
+    }
+    showToast(`Viewing as ${formatUserTypeLabel(typeKey)}`, 'info');
   };
 
   const getDocTypeIcon = (type) => {
@@ -1385,8 +1482,16 @@ function App() {
     </div>
   );
 
+  const effectiveUserType = getEffectiveUserType(currentUser, viewAsUserType);
+  const workspaceCanWrite = canWriteWorkspace(currentUser, viewAsUserType);
+  const isViewAsPreview = Boolean(currentUser && isAdminUser(currentUser) && viewAsUserType);
+
   return (
-    <div className={`app-root ${isWorkspace ? 'gdrive-theme' : ''}`}>
+    <div
+      className={`app-root ${isWorkspace ? 'gdrive-theme' : ''}${isViewAsPreview ? ' view-as-active' : ''}`}
+      data-effective-user-type={currentUser ? effectiveUserType : undefined}
+      data-workspace-can-write={currentUser ? String(workspaceCanWrite) : undefined}
+    >
       {/* Background glow for all pages */}
       <div className="glow-bg">
         <div className="glow-sphere sphere-1"></div>
@@ -1397,7 +1502,11 @@ function App() {
       {/* Global Header Navigation */}
       <header className={`main-header ${isWorkspace ? 'gdrive-header' : ''}`}>
         <div className="header-container">
-          <div className="logo-wrapper" style={{ cursor: 'pointer' }} onClick={() => navigate('/')}>
+          <div
+            className="logo-wrapper"
+            style={{ cursor: 'pointer' }}
+            onClick={() => navigate(currentUser ? '/workspace' : '/')}
+          >
             <div className="logo">
               <ShieldCheck className="logo-icon" />
               <span className="logo-text">Edu<span>Vault</span></span>
@@ -1441,12 +1550,16 @@ function App() {
           <div className="header-actions">
             {currentUser ? (
               <div className="user-profile-header">
-                <div className="user-account-menu">
+                <div
+                  className={`user-account-menu${accountMenuDismissed ? ' is-dismissed' : ''}`}
+                  onMouseLeave={() => setAccountMenuDismissed(false)}
+                >
                   <button
                     type="button"
                     className="btn btn-secondary user-account-trigger"
                     aria-haspopup="menu"
                     aria-label="Account menu"
+                    onFocus={() => setAccountMenuDismissed(false)}
                   >
                     <UserAvatar user={currentUser} size={16} />
                     <span>{userDisplayName(currentUser)}</span>
@@ -1457,6 +1570,42 @@ function App() {
                       <User size={16} />
                       <span>Account</span>
                     </button>
+                    {isAdminUser(currentUser) && (
+                      <div className={`user-account-submenu-wrap${viewAsMenuOpen ? ' is-open' : ''}`}>
+                        <button
+                          type="button"
+                          className="dropdown-item user-view-as-trigger"
+                          role="menuitem"
+                          aria-haspopup="menu"
+                          aria-expanded={viewAsMenuOpen}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setViewAsMenuOpen((open) => !open);
+                          }}
+                        >
+                          <Eye size={16} />
+                          <span>View as</span>
+                          <ChevronDown size={14} className="user-view-as-chevron" aria-hidden="true" />
+                        </button>
+                        <div className="user-account-submenu" role="menu" aria-label="View as role">
+                          {VIEW_AS_USER_TYPES.map((typeKey) => {
+                            const isActive = effectiveUserType === typeKey;
+                            return (
+                              <button
+                                key={typeKey}
+                                type="button"
+                                className={`dropdown-item user-view-as-option${isActive ? ' active' : ''}`}
+                                role="menuitem"
+                                onClick={() => handleViewAsSelect(typeKey)}
+                              >
+                                {isActive ? <Check size={16} /> : <span className="user-view-as-option-spacer" aria-hidden="true" />}
+                                <span>{formatUserTypeLabel(typeKey)}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                     <button type="button" className="dropdown-item" role="menuitem">
                       <Settings size={16} />
                       <span>Settings</span>
@@ -1507,6 +1656,17 @@ function App() {
           </div>
         </div>
       </header>
+
+      {isViewAsPreview && (
+        <div className="view-as-banner" role="status">
+          <span>
+            Previewing as <strong>{formatUserTypeLabel(effectiveUserType)}</strong> (admin view-as mode)
+          </span>
+          <button type="button" className="view-as-banner-exit" onClick={() => setViewAsUserType(null)}>
+            Exit preview
+          </button>
+        </div>
+      )}
 
       <main className="main-content">
         {isHome && (
@@ -1757,6 +1917,7 @@ function App() {
             {/* Left Sidebar */}
             <aside className={`gdrive-sidebar${workspaceSidebarOpen ? '' : ' is-collapsed'}`}>
               {/* + New Button with Dropdown */}
+              {workspaceCanWrite && (
               <div className="gdrive-new-wrapper" ref={newDropdownRef}>
                 <div className="gdrive-sidebar-new-row">
                   <button 
@@ -1812,6 +1973,7 @@ function App() {
                   onChange={handleWorkspaceFileUpload}
                 />
               </div>
+              )}
 
               {/* Sidebar Navigation Links */}
               <nav className="gdrive-nav-list">
@@ -1858,15 +2020,18 @@ function App() {
                   <span>Starred</span>
                 </button>
 
-                <div className="gdrive-nav-divider"></div>
-
-                <button 
-                  className={`gdrive-nav-item ${selectedNav === 'trash' ? 'active' : ''}`}
-                  onClick={() => { setSelectedNav('trash'); setActiveFolderId(null); }}
-                >
-                  <Trash2 size={18} />
-                  <span>Trash</span>
-                </button>
+                {workspaceCanWrite && (
+                  <>
+                    <div className="gdrive-nav-divider"></div>
+                    <button 
+                      className={`gdrive-nav-item ${selectedNav === 'trash' ? 'active' : ''}`}
+                      onClick={() => { setSelectedNav('trash'); setActiveFolderId(null); }}
+                    >
+                      <Trash2 size={18} />
+                      <span>Trash</span>
+                    </button>
+                  </>
+                )}
               </nav>
 
               {/* Custom EduVault Storage Card */}
@@ -1898,6 +2063,11 @@ function App() {
 
             {/* Main Content Area */}
             <main className="gdrive-main-pane">
+              {!workspaceCanWrite && (
+                <p className="workspace-readonly-notice" role="status">
+                  Read-only access — you can browse, open, and download. Editing and sharing are disabled.
+                </p>
+              )}
               {/* Workspace Top Search & Filter Bar */}
               <div className="gdrive-top-bar">
                 <div className="gdrive-top-bar-search-row">
@@ -1926,14 +2096,16 @@ function App() {
                       </button>
                     )}
                   </div>
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm workspace-back-btn"
-                    onClick={() => navigate('/')}
-                  >
-                    <ArrowLeft size={16} />
-                    <span>Back to overview</span>
-                  </button>
+                  {!currentUser && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm workspace-back-btn"
+                      onClick={() => navigate('/')}
+                    >
+                      <ArrowLeft size={16} />
+                      <span>Back to overview</span>
+                    </button>
+                  )}
                 </div>
 
                 <div className="workspace-academic-filters-bar">
@@ -2003,9 +2175,6 @@ function App() {
                       <h1 className="gdrive-title" data-testid="workspace-context-title">{getBreadcrumb()}</h1>
                     )}
                   </div>
-                  <button className="gdrive-info-btn" title="View details" onClick={() => showToast("EduVault Academic Workspace v2.4", "info")}>
-                    <Info size={18} />
-                  </button>
                 </div>
 
                 {/* Section 1: Suggested Folders */}
@@ -2021,7 +2190,7 @@ function App() {
 
                     {suggestedFoldersOpen && (
                       <div className="gdrive-folders-grid">
-                        {isCreatingFolder && (
+                        {workspaceCanWrite && isCreatingFolder && (
                           <div className="gdrive-folder-card inline-create-folder-card" onClick={(e) => e.stopPropagation()}>
                             <div className="folder-icon-circle creating-icon">
                               <Folder size={18} />
@@ -2105,38 +2274,40 @@ function App() {
                                     <span className="item-label">Download</span>
                                   </button>
 
-                                  {/* Row 2: Rename */}
-                                  <button 
-                                    className="context-menu-item"
-                                    onClick={() => {
-                                      setRenamingFolder(folder);
-                                      setRenameFolderInputVal(folder.name);
-                                      setActiveMenuFolderId(null);
-                                    }}
-                                  >
-                                    <div className="item-icon-box">
-                                      <Pencil size={16} />
-                                    </div>
-                                    <span className="item-label">Rename</span>
-                                    <span className="item-shortcut-tag">⌥⌘E</span>
-                                  </button>
+                                  {workspaceCanWrite && (
+                                    <>
+                                      <button 
+                                        className="context-menu-item"
+                                        onClick={() => {
+                                          setRenamingFolder(folder);
+                                          setRenameFolderInputVal(folder.name);
+                                          setActiveMenuFolderId(null);
+                                        }}
+                                      >
+                                        <div className="item-icon-box">
+                                          <Pencil size={16} />
+                                        </div>
+                                        <span className="item-label">Rename</span>
+                                        <span className="item-shortcut-tag">⌥⌘E</span>
+                                      </button>
 
-                                  <div className="context-menu-divider"></div>
+                                      <div className="context-menu-divider"></div>
 
-                                  {/* Row 3: Share */}
-                                  <button 
-                                    className="context-menu-item"
-                                    onClick={() => {
-                                      setSharingFolder(folder);
-                                      setActiveMenuFolderId(null);
-                                    }}
-                                  >
-                                    <div className="item-icon-box">
-                                      <UserPlus size={16} />
-                                    </div>
-                                    <span className="item-label">Share</span>
-                                    <ChevronRight size={14} className="item-chevron-right" />
-                                  </button>
+                                      <button 
+                                        className="context-menu-item"
+                                        onClick={() => {
+                                          setSharingFolder(folder);
+                                          setActiveMenuFolderId(null);
+                                        }}
+                                      >
+                                        <div className="item-icon-box">
+                                          <UserPlus size={16} />
+                                        </div>
+                                        <span className="item-label">Share</span>
+                                        <ChevronRight size={14} className="item-chevron-right" />
+                                      </button>
+                                    </>
+                                  )}
 
                                   {/* Row 4: Folder information */}
                                   <button 
@@ -2154,21 +2325,23 @@ function App() {
                                     <ChevronRight size={14} className="item-chevron-right" />
                                   </button>
 
-                                  <div className="context-menu-divider"></div>
-
-                                  {/* Row 5: Move to trash */}
-                                  <button 
-                                    className="context-menu-item"
-                                    onClick={(e) => {
-                                      handleDeleteFolder(folder.id, folder.name, e);
-                                    }}
-                                  >
-                                    <div className="item-icon-box">
-                                      <Trash2 size={16} />
-                                    </div>
-                                    <span className="item-label">Move to trash</span>
-                                    <span className="item-shortcut-tag">Delete</span>
-                                  </button>
+                                  {workspaceCanWrite && (
+                                    <>
+                                      <div className="context-menu-divider"></div>
+                                      <button 
+                                        className="context-menu-item"
+                                        onClick={(e) => {
+                                          handleDeleteFolder(folder.id, folder.name, e);
+                                        }}
+                                      >
+                                        <div className="item-icon-box">
+                                          <Trash2 size={16} />
+                                        </div>
+                                        <span className="item-label">Move to trash</span>
+                                        <span className="item-shortcut-tag">Delete</span>
+                                      </button>
+                                    </>
+                                  )}
                                 </div>
                               )}
                             </div>
@@ -2264,19 +2437,20 @@ function App() {
 
                                         <div className="context-menu-divider"></div>
 
-                                        {/* Star / Unstar */}
-                                        <button 
-                                          className="context-menu-item"
-                                          onClick={() => {
-                                            handleToggleStar(doc.id);
-                                            setActiveMenuDocId(null);
-                                          }}
-                                        >
-                                          <div className="item-icon-box">
-                                            <Star size={16} fill={doc.starred ? "currentColor" : "none"} />
-                                          </div>
-                                          <span className="item-label">{doc.starred ? "Remove from Starred" : "Add to Starred"}</span>
-                                        </button>
+                                        {workspaceCanWrite && (
+                                          <button 
+                                            className="context-menu-item"
+                                            onClick={() => {
+                                              handleToggleStar(doc.id);
+                                              setActiveMenuDocId(null);
+                                            }}
+                                          >
+                                            <div className="item-icon-box">
+                                              <Star size={16} fill={doc.starred ? "currentColor" : "none"} />
+                                            </div>
+                                            <span className="item-label">{doc.starred ? "Remove from Starred" : "Add to Starred"}</span>
+                                          </button>
+                                        )}
 
                                         {/* Row 2: Download */}
                                         <button 
@@ -2292,65 +2466,65 @@ function App() {
                                           <span className="item-label">Download</span>
                                         </button>
 
-                                        {/* Row 3: Rename */}
-                                        <button 
-                                          className="context-menu-item"
-                                          onClick={() => {
-                                            setRenamingDoc(doc);
-                                            setRenameInputVal(doc.title);
-                                            setActiveMenuDocId(null);
-                                          }}
-                                        >
-                                          <div className="item-icon-box">
-                                            <Pencil size={16} />
-                                          </div>
-                                          <span className="item-label">Rename</span>
-                                          <span className="item-shortcut-tag">⌥⌘E</span>
-                                        </button>
+                                        {workspaceCanWrite && (
+                                          <>
+                                            <button 
+                                              className="context-menu-item"
+                                              onClick={() => {
+                                                setRenamingDoc(doc);
+                                                setRenameInputVal(doc.title);
+                                                setActiveMenuDocId(null);
+                                              }}
+                                            >
+                                              <div className="item-icon-box">
+                                                <Pencil size={16} />
+                                              </div>
+                                              <span className="item-label">Rename</span>
+                                              <span className="item-shortcut-tag">⌥⌘E</span>
+                                            </button>
 
-                                        {/* Row 4: Make a copy */}
-                                        <button 
-                                          className="context-menu-item"
-                                          onClick={() => handleMakeCopy(doc)}
-                                        >
-                                          <div className="item-icon-box">
-                                            <Copy size={16} />
-                                          </div>
-                                          <span className="item-label">Make a copy</span>
-                                          <span className="item-shortcut-tag">⌘C ⌘V</span>
-                                        </button>
+                                            <button 
+                                              className="context-menu-item"
+                                              onClick={() => handleMakeCopy(doc)}
+                                            >
+                                              <div className="item-icon-box">
+                                                <Copy size={16} />
+                                              </div>
+                                              <span className="item-label">Make a copy</span>
+                                              <span className="item-shortcut-tag">⌘C ⌘V</span>
+                                            </button>
 
-                                        <div className="context-menu-divider"></div>
+                                            <div className="context-menu-divider"></div>
 
-                                        {/* Row 5: Share */}
-                                        <button 
-                                          className="context-menu-item"
-                                          onClick={() => {
-                                            setSharingDoc(doc);
-                                            setActiveMenuDocId(null);
-                                          }}
-                                        >
-                                          <div className="item-icon-box">
-                                            <UserPlus size={16} />
-                                          </div>
-                                          <span className="item-label">Share</span>
-                                          <ChevronRight size={14} className="item-chevron-right" />
-                                        </button>
+                                            <button 
+                                              className="context-menu-item"
+                                              onClick={() => {
+                                                setSharingDoc(doc);
+                                                setActiveMenuDocId(null);
+                                              }}
+                                            >
+                                              <div className="item-icon-box">
+                                                <UserPlus size={16} />
+                                              </div>
+                                              <span className="item-label">Share</span>
+                                              <ChevronRight size={14} className="item-chevron-right" />
+                                            </button>
 
-                                        {/* Row 6: Organize */}
-                                        <button 
-                                          className="context-menu-item"
-                                          onClick={() => {
-                                            setMovingDoc(doc);
-                                            setActiveMenuDocId(null);
-                                          }}
-                                        >
-                                          <div className="item-icon-box">
-                                            <Folder size={16} />
-                                          </div>
-                                          <span className="item-label">Organize</span>
-                                          <ChevronRight size={14} className="item-chevron-right" />
-                                        </button>
+                                            <button 
+                                              className="context-menu-item"
+                                              onClick={() => {
+                                                setMovingDoc(doc);
+                                                setActiveMenuDocId(null);
+                                              }}
+                                            >
+                                              <div className="item-icon-box">
+                                                <Folder size={16} />
+                                              </div>
+                                              <span className="item-label">Organize</span>
+                                              <ChevronRight size={14} className="item-chevron-right" />
+                                            </button>
+                                          </>
+                                        )}
 
                                         {/* Row 7: File information */}
                                         <button 
@@ -2367,22 +2541,24 @@ function App() {
                                           <ChevronRight size={14} className="item-chevron-right" />
                                         </button>
 
-                                        <div className="context-menu-divider"></div>
-
-                                        {/* Row 8: Move to trash */}
-                                        <button 
-                                          className="context-menu-item"
-                                          onClick={(e) => {
-                                            handleDeleteDocument(doc.id, doc.title, e);
-                                            setActiveMenuDocId(null);
-                                          }}
-                                        >
-                                          <div className="item-icon-box">
-                                            <Trash2 size={16} />
-                                          </div>
-                                          <span className="item-label">Move to trash</span>
-                                          <span className="item-shortcut-tag">Delete</span>
-                                        </button>
+                                        {workspaceCanWrite && (
+                                          <>
+                                            <div className="context-menu-divider"></div>
+                                            <button 
+                                              className="context-menu-item"
+                                              onClick={(e) => {
+                                                handleDeleteDocument(doc.id, doc.title, e);
+                                                setActiveMenuDocId(null);
+                                              }}
+                                            >
+                                              <div className="item-icon-box">
+                                                <Trash2 size={16} />
+                                              </div>
+                                              <span className="item-label">Move to trash</span>
+                                              <span className="item-shortcut-tag">Delete</span>
+                                            </button>
+                                          </>
+                                        )}
                                       </div>
                                     )}
                                   </div>
@@ -2412,7 +2588,7 @@ function App() {
                                 <th>Owner</th>
                                 <th>Last modified</th>
                                 <th>File size</th>
-                                <th style={{ textAlign: 'right' }}>Actions</th>
+                                {workspaceCanWrite && <th style={{ textAlign: 'right' }}>Actions</th>}
                               </tr>
                             </thead>
                             <tbody>
@@ -2425,15 +2601,17 @@ function App() {
                                   <td>{doc.owner}</td>
                                   <td>{doc.date}</td>
                                   <td>{doc.size}</td>
-                                  <td style={{ textAlign: 'right' }}>
-                                    <button 
-                                      className="table-action-icon"
-                                      onClick={(e) => handleDeleteDocument(doc.id, doc.title, e)}
-                                      title="Delete"
-                                    >
-                                      <Trash2 size={16} />
-                                    </button>
-                                  </td>
+                                  {workspaceCanWrite && (
+                                    <td style={{ textAlign: 'right' }}>
+                                      <button 
+                                        className="table-action-icon"
+                                        onClick={(e) => handleDeleteDocument(doc.id, doc.title, e)}
+                                        title="Delete"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </td>
+                                  )}
                                 </tr>
                               ))}
                             </tbody>
@@ -2463,10 +2641,10 @@ function App() {
                   <button
                     type="button"
                     className="btn btn-secondary btn-sm account-back-btn"
-                    onClick={() => navigate('/')}
+                    onClick={() => navigate('/workspace')}
                   >
                     <ArrowLeft size={16} />
-                    <span>Back to home</span>
+                    <span>Back to workspace</span>
                   </button>
                 </div>
                 <p className="account-page-subtitle">Manage your profile and sign-in details.</p>
@@ -2581,24 +2759,26 @@ function App() {
                 </button>
               </div>
 
-              <div className="account-card account-card-danger">
-                <h2>Delete account</h2>
-                <p className="account-danger-text">
-                  Permanently remove your account and sign-in from EduVault. This cannot be undone.
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-secondary account-delete-btn"
-                  onClick={() => {
-                    setAccountError("");
-                    setDeleteAccountPassword("");
-                    setShowDeleteAccountConfirm(true);
-                  }}
-                >
-                  <Trash2 size={16} />
-                  <span>Delete account</span>
-                </button>
-              </div>
+              {effectiveUserType === 'admin' && (
+                <div className="account-card account-card-danger">
+                  <h2>Delete account</h2>
+                  <p className="account-danger-text">
+                    Permanently remove your account and sign-in from EduVault. This cannot be undone.
+                  </p>
+                  <button
+                    type="button"
+                    className="btn btn-secondary account-delete-btn"
+                    onClick={() => {
+                      setAccountError("");
+                      setDeleteAccountPassword("");
+                      setShowDeleteAccountConfirm(true);
+                    }}
+                  >
+                    <Trash2 size={16} />
+                    <span>Delete account</span>
+                  </button>
+                </div>
+              )}
             </div>
           </section>
         )}

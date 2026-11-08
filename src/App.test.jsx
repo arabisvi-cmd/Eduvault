@@ -38,7 +38,10 @@ vi.mock('./lib/supabase', () => ({
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
-      signInWithPassword: vi.fn().mockResolvedValue({ data: { user: { email: 'arabisvi@gmail.com' } }, error: null }),
+      signInWithPassword: vi.fn().mockResolvedValue({
+        data: { user: { email: 'arabisvi@gmail.com', user_metadata: { user_type: 'teacher' } } },
+        error: null,
+      }),
       signUp: vi.fn().mockResolvedValue({ data: { user: { email: 'arabisvi@gmail.com' } }, error: null }),
       signOut: vi.fn().mockResolvedValue({ error: null })
     },
@@ -60,7 +63,8 @@ async function loginTestUser() {
   fireEvent.change(screen.getByPlaceholderText('••••••••'), { target: { value: 'password123' } });
   fireEvent.click(screen.getByRole('button', { name: 'Log In' }));
   await waitFor(() => {
-    expect(screen.getByRole('link', { name: /Workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Account menu/i })).toBeInTheDocument();
+    expect(screen.getByTestId('workspace-context-title')).toBeInTheDocument();
   });
 }
 
@@ -105,9 +109,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     const submitBtn = screen.getByRole('button', { name: 'Log In' });
     fireEvent.click(submitBtn);
     
-    // Should be returned to Home page and showing user profile button in header
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Account menu/i })).toBeInTheDocument();
+      expect(screen.getByTestId('workspace-context-title')).toBeInTheDocument();
     });
   });
 
@@ -136,10 +140,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     renderApp();
     await loginTestUser();
 
-    // Click Workspace navigation link
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     expect(screen.getByTestId('workspace-context-title')).toHaveTextContent(/St\. Xavier High School/);
     expect(screen.getByTestId('workspace-context-title')).toHaveTextContent(/Physics/);
     expect(screen.getByText('Suggested folders')).toBeInTheDocument();
@@ -162,10 +162,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     renderApp();
     await loginTestUser();
 
-    // Navigate to Workspace
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     // Find List view button
     const listBtn = screen.getByTitle('List view');
     fireEvent.click(listBtn);
@@ -180,9 +176,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     await loginTestUser();
 
     // Navigate to Workspace
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     // Click on a folder
     const folderCard = screen.getByText('Physics Lecture Slides');
     fireEvent.click(folderCard);
@@ -203,9 +196,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     await loginTestUser();
 
     // Navigate to Workspace
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     // Open New dropdown
     const newBtn = screen.getByRole('button', { name: /New/i });
     fireEvent.click(newBtn);
@@ -232,9 +222,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     await loginTestUser();
 
     // Navigate to Workspace
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     // Click the 3-dots button on the first file card
     const moreBtns = screen.getAllByTitle('More actions');
     expect(moreBtns.length).toBeGreaterThan(0);
@@ -264,9 +251,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     await loginTestUser();
 
     // Navigate to Workspace
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     // Click the 3-dots button on a folder card
     const folderMoreBtns = screen.getAllByTitle('Folder options');
     expect(folderMoreBtns.length).toBeGreaterThan(0);
@@ -294,9 +278,6 @@ describe('EduVault App Rendering & Navigation tests', () => {
     await loginTestUser();
 
     // Navigate to Workspace
-    const workspaceLink = screen.getByRole('link', { name: /Workspace/i });
-    fireEvent.click(workspaceLink);
-
     // Verify "+ Create filter" button exists
     const createFilterBtn = screen.getByRole('button', { name: /\+ Create filter/i });
     expect(createFilterBtn).toBeInTheDocument();

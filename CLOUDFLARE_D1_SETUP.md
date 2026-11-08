@@ -57,6 +57,33 @@ In the Cloudflare dashboard:
 
 ---
 
+## 3b. Upgrade an existing `eduvault-db` (missing `user_type` / roster)
+
+If signup fails with **`table users has no column named user_type`**, the database was created from an older schema. Run [d1-migrate-existing.sql](./d1-migrate-existing.sql) once:
+
+**D1 Console:** Storage & Databases → **eduvault-db** → **Console** → paste the file → **Execute**.
+
+**Wrangler CLI (local D1 while `wrangler dev`):**
+
+```bash
+npx wrangler d1 execute eduvault-db --local --file=./d1-migrate-existing.sql
+```
+
+**Wrangler CLI (production D1):**
+
+```bash
+npx wrangler d1 execute eduvault-db --remote --file=./d1-migrate-existing.sql
+```
+
+Then add your email to the roster before sign-up:
+
+```sql
+INSERT OR IGNORE INTO user_directory (email, user_type, institution)
+VALUES ('you@school.edu', 'teacher', 'inst-1');
+```
+
+---
+
 ## 4. Deploy EduVault to Cloudflare Pages
 1. Go to **Workers & Pages** in your Cloudflare sidebar.
 2. Click **Create Application** → select the **Pages** tab → **Connect to Git**.
