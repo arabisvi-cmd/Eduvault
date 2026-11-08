@@ -34,6 +34,15 @@ async function lookupDirectoryUser(env, email) {
   ).bind(email.toLowerCase()).first();
 }
 
+async function syncUserTypeFromRoster(env, userRow) {
+  const directoryEntry = await lookupDirectoryUser(env, userRow.email);
+  if (!directoryEntry) return userRow;
+  const rosterType = normalizeUserType(directoryEntry.user_type);
+  if (!rosterType || rosterType === userRow.user_type) return userRow;
+  await env.DB.prepare('UPDATE users SET user_type = ? WHERE id = ?').bind(rosterType, userRow.id).run();
+  return { ...userRow, user_type: rosterType };
+}
+
 async function hashPassword(password, saltHex = null) {
   const enc = new TextEncoder();
   const salt = saltHex
@@ -181,9 +190,11 @@ export async function handleApi(request, env) {
         return jsonResponse({ error: 'Invalid email or password' }, 401);
       }
 
+      const syncedUser = await syncUserTypeFromRoster(env, user);
+
       return jsonResponse({
         success: true,
-        user: publicUser(user),
+        user: publicUser(syncedUser),
       });
     }
 
@@ -269,6 +280,11 @@ export async function handleApi(request, env) {
       const { hash } = await hashPassword(password, user.salt);
       if (hash !== user.password_hash) {
         return jsonResponse({ error: 'Password is incorrect' }, 401);
+      }
+
+      const synced = await syncUserTypeFromRoster(env, user);
+      if (normalizeUserType(synced.user_type) !== 'admin') {
+        return jsonResponse({ error: 'Only administrators can delete accounts' }, 403);
       }
 
       await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
