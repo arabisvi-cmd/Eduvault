@@ -116,8 +116,11 @@ export const api = {
 
   // Documents
   documents: {
-    async list(institutionId) {
-      const qs = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
+    async list(institutionId, { trash = false } = {}) {
+      const params = new URLSearchParams();
+      if (institutionId) params.set('institution_id', institutionId);
+      if (trash) params.set('trash', '1');
+      const qs = params.toString() ? `?${params.toString()}` : '';
       const res = await safeFetch(`${API_BASE}/documents${qs}`);
       const data = await parseApiJson(res);
       return data.data || [];

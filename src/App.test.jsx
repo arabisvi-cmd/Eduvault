@@ -26,7 +26,7 @@ vi.mock('./lib/api', () => ({
       updateProfile: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
     },
     documents: {
-      list: vi.fn().mockResolvedValue([]),
+      list: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
       create: vi.fn().mockResolvedValue({}),
       patch: vi.fn().mockResolvedValue({}),
     },
@@ -126,17 +126,15 @@ describe('EduVault App Rendering & Navigation tests', () => {
     });
   });
 
-  it('should filter documents when typing in the hero search bar', () => {
+  it('should filter documents when typing in the hero search bar', async () => {
     renderApp();
+    await waitFor(() => {
+      expect(screen.getByText('Mid-Term Physics Study Guide')).toBeInTheDocument();
+    });
 
-    // Get hero search input
     const searchInput = screen.getByTestId('hero-search-input');
-    expect(searchInput).toBeInTheDocument();
-
-    // Type a specific term e.g., 'Optics'
     fireEvent.change(searchInput, { target: { value: 'Optics' } });
 
-    // Verify list updates
     expect(screen.getByText('Optics Formulas & Cheat Sheet')).toBeInTheDocument();
     expect(screen.queryByText('Mid-Term Physics Study Guide')).not.toBeInTheDocument();
   });

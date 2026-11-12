@@ -7,7 +7,7 @@ import {
   Trash2, Folder, Image, Download, Home, HardDrive,
   Star, Cloud, MoreVertical, LayoutGrid, List, ChevronDown,
   Film, FileCode, Archive, X, Check, Sun, Moon,
-  Share2, FolderInput, Copy, Pencil, ExternalLink,
+  Share2, FolderInput, Copy, Pencil, ExternalLink, RotateCcw,
   User, Settings, LogOut, PanelLeft, PanelLeftClose, Eye
 } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -375,6 +375,37 @@ function mapSectionFromApi(row) {
   return { id: row.id, name: row.name };
 }
 
+function mapDocumentFromApi(doc) {
+  const fileType = doc.file_type || doc.type || 'pdf';
+  const created = doc.created_at ? new Date(doc.created_at) : null;
+  const dateStr = created
+    ? created.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' })
+    : 'Recently';
+  const activityShort = created
+    ? created.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+    : 'Recently';
+  return {
+    id: doc.id,
+    title: doc.title,
+    institution: doc.institution,
+    year: doc.academic_year || doc.year || '2026-2027',
+    class: doc.class_grade || doc.class || 'grade-10',
+    subject: doc.subject || 'physics',
+    timeline: doc.timeline || 'term-1',
+    type: fileType,
+    size: doc.file_size || doc.size || '1.0 MB',
+    date: dateStr,
+    activity: `Uploaded • ${activityShort}`,
+    owner: doc.owner || 'me',
+    section: doc.section || 'Section A',
+    role: doc.role || 'students',
+    folderId: doc.folder_id || doc.folderId || null,
+    vaultSectionId: doc.vault_section_id || undefined,
+    isTrash: Boolean(doc.deleted_at),
+    previewType: fileType === 'image' ? 'diagram-preview' : fileType === 'xlsx' ? 'sheet-preview' : fileType === 'code' ? 'code-preview' : 'pdf-text',
+  };
+}
+
 function normalizeUserTypeKey(userType) {
   return String(userType || 'student').trim().toLowerCase().replace(/\s+/g, '_');
 }
@@ -454,7 +485,7 @@ function Modal({ title, icon: Icon, onClose, children }) {
 }
 
 function App() {
-  const [documents, setDocuments] = useState(INITIAL_DOCUMENTS);
+  const [documents, setDocuments] = useState([]);
   const [filterInst, setFilterInst] = useState("inst-1");
   const [filterYear, setFilterYear] = useState("2026-2027");
   const [filterClass, setFilterClass] = useState("grade-10");
@@ -667,6 +698,41 @@ function App() {
     }
   }, [vaultSections, selectedNav]);
 
+  const trashNavActive = selectedNav === 'trash';
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const d1Docs = await api.documents.list(workspaceInstitutionId, { trash: trashNavActive });
+        if (cancelled) return;
+        setDocuments(d1Docs.map(mapDocumentFromApi));
+        return;
+      } catch {
+        // API offline
+      }
+      if (cancelled) return;
+      if (isSupabaseConfigured && supabase) {
+        try {
+          const { data, error } = await supabase
+            .from('documents')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (!error && data?.length) {
+            setDocuments(data.map((row) => mapDocumentFromApi({ ...row, folder_id: row.folderId })));
+            return;
+          }
+        } catch (err) {
+          console.warn('Could not load documents from Supabase', err);
+        }
+      }
+      if (!cancelled) {
+        setDocuments(trashNavActive ? [] : INITIAL_DOCUMENTS);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [workspaceInstitutionId, trashNavActive]);
+
   useEffect(() => {
     const target = location.state?.scrollTo;
     if (!isHome || !target) return;
@@ -706,82 +772,12 @@ function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Auth & Document Fetching (supports Cloudflare D1 API with Supabase fallback)
+  // Auth (Cloudflare D1 localStorage + optional Supabase session)
   useEffect(() => {
-    // 1. Check local session from Cloudflare D1 / local storage
     const savedUser = api.auth.getCurrentUser();
     if (savedUser?.email) {
       setCurrentUser(sessionFromApiUser(savedUser));
     }
-
-    // 2. Load documents from Cloudflare D1 API, fallback to Supabase if configured
-    async function loadDocuments() {
-      try {
-        const instId = filterInst !== 'all' ? filterInst : 'inst-1';
-        const d1Docs = await api.documents.list(instId);
-        if (d1Docs && d1Docs.length > 0) {
-          const mappedDocs = d1Docs.map(doc => ({
-            id: doc.id,
-            title: doc.title,
-            institution: doc.institution,
-            year: doc.academic_year || doc.year || '2026-2027',
-            class: doc.class_grade || doc.class || 'grade-10',
-            subject: doc.subject || 'physics',
-            timeline: doc.timeline || 'term-1',
-            type: doc.file_type || doc.type || 'pdf',
-            size: doc.file_size || doc.size || '1.0 MB',
-            date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recently',
-            activity: `Uploaded • ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Recently'}`,
-            owner: doc.owner || "me",
-            section: doc.section || "Section A",
-            role: doc.role || "students",
-            folderId: doc.folder_id || doc.folderId || null,
-            vaultSectionId: doc.vault_section_id || undefined,
-            previewType: (doc.file_type || doc.type) === 'image' ? 'diagram-preview' : (doc.file_type || doc.type) === 'xlsx' ? 'sheet-preview' : (doc.file_type || doc.type) === 'code' ? 'code-preview' : 'pdf-text'
-          }));
-          setDocuments(mappedDocs);
-          return;
-        }
-      } catch {
-        // Cloudflare D1 API not responding or offline (e.g. during local offline dev)
-      }
-
-      // Supabase fallback if configured
-      if (isSupabaseConfigured && supabase) {
-        try {
-          const { data, error } = await supabase
-            .from('documents')
-            .select('*')
-            .order('created_at', { ascending: false });
-
-          if (!error && data && data.length > 0) {
-            const mappedDocs = data.map(doc => ({
-              id: doc.id,
-              title: doc.title,
-              institution: doc.institution,
-              year: doc.academic_year || doc.year || '2026-2027',
-              class: doc.class_grade || doc.class || 'grade-10',
-              subject: doc.subject || 'physics',
-              timeline: doc.timeline || 'term-1',
-              type: doc.file_type || doc.type || 'pdf',
-              size: doc.file_size || doc.size || '1.0 MB',
-              date: doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' }) : 'Recently',
-              activity: `Uploaded • ${doc.created_at ? new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Recently'}`,
-              owner: doc.owner || "me",
-              section: doc.section || "Section A",
-              role: doc.role || "students",
-              folderId: doc.folderId || null,
-              previewType: doc.file_type === 'image' ? 'diagram-preview' : doc.file_type === 'xlsx' ? 'sheet-preview' : doc.file_type === 'code' ? 'code-preview' : 'pdf-text'
-            }));
-            setDocuments(mappedDocs);
-          }
-        } catch (err) {
-          console.warn('Could not load documents from Supabase, using defaults', err);
-        }
-      }
-    }
-
-    loadDocuments();
 
     // Check Supabase session if configured
     let subscription;
@@ -806,7 +802,7 @@ function App() {
     return () => {
       subscription?.unsubscribe?.();
     };
-  }, [filterInst]);
+  }, []);
   const filteredDocs = documents.filter(doc => {
     if (filterInst !== 'all' && doc.institution !== filterInst) return false;
     if (filterYear !== 'all' && doc.year !== filterYear) return false;
@@ -1152,11 +1148,49 @@ function App() {
     }
   };
 
-  const handleDeleteDocument = (id, title, e) => {
+  const handleMoveDocumentToTrash = async (id, title, e) => {
     if (e) e.stopPropagation();
     if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
-    setDocuments(documents.filter(doc => doc.id !== id));
-    showToast(`Removed "${title}"`, "info");
+    const removeFromView = () => {
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      showToast(`Moved "${title}" to trash`, 'info');
+    };
+    if (!currentUser?.email) {
+      setDocuments((prev) => prev.map((d) => (d.id === id ? { ...d, isTrash: true } : d)));
+      showToast(`Moved "${title}" to trash`, 'info');
+      return;
+    }
+    try {
+      await api.documents.patch(id, { email: currentUser.email, trash: true });
+      removeFromView();
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) {
+        setDocuments((prev) => prev.map((d) => (d.id === id ? { ...d, isTrash: true } : d)));
+        showToast(`Moved "${title}" to trash`, 'info');
+      } else {
+        showToast(err.message || 'Could not move to trash', 'info');
+      }
+    }
+  };
+
+  const handleRestoreDocumentFromTrash = async (id, title, e) => {
+    if (e) e.stopPropagation();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
+    const removeFromView = () => {
+      setDocuments((prev) => prev.filter((doc) => doc.id !== id));
+      showToast(`Restored "${title}"`, 'check-circle');
+    };
+    if (!currentUser?.email) {
+      removeFromView();
+      return;
+    }
+    try {
+      await api.documents.patch(id, { email: currentUser.email, restore: true });
+      removeFromView();
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) removeFromView();
+      else showToast(err.message || 'Could not restore', 'info');
+    }
   };
 
   const handleToggleStar = (docId) => {
@@ -1233,26 +1267,59 @@ function App() {
     setActiveMenuFolderId(null);
   };
 
-  const handleRenameSubmit = (e) => {
+  const handleRenameSubmit = async (e) => {
     e.preventDefault();
     if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     if (!renamingDoc || !renameInputVal.trim()) return;
-    setDocuments(documents.map((d) => (
-      d.id === renamingDoc.id ? { ...d, title: renameInputVal.trim() } : d
-    )));
-    showToast(`Renamed to "${renameInputVal.trim()}"`, 'check-circle');
-    setRenamingDoc(null);
-    setRenameInputVal('');
+    const nextTitle = renameInputVal.trim();
+    const apply = () => {
+      setDocuments((prev) => prev.map((d) => (
+        d.id === renamingDoc.id ? { ...d, title: nextTitle } : d
+      )));
+      showToast(`Renamed to "${nextTitle}"`, 'check-circle');
+      setRenamingDoc(null);
+      setRenameInputVal('');
+    };
+    if (!currentUser?.email || typeof renamingDoc.id === 'number') {
+      apply();
+      return;
+    }
+    try {
+      await api.documents.patch(renamingDoc.id, { email: currentUser.email, title: nextTitle });
+      apply();
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) apply();
+      else showToast(err.message || 'Could not rename file', 'info');
+    }
   };
 
-  const handleRenameFolderSubmit = (e) => {
+  const handleRenameFolderSubmit = async (e) => {
     e.preventDefault();
     if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     if (!renamingFolder || !renameFolderInputVal.trim()) return;
-    setFolders(folders.map(f => f.id === renamingFolder.id ? { ...f, name: renameFolderInputVal.trim() } : f));
-    showToast(`Renamed folder to "${renameFolderInputVal.trim()}"`, "check-circle");
-    setRenamingFolder(null);
-    setRenameFolderInputVal("");
+    const nextName = renameFolderInputVal.trim();
+    const apply = () => {
+      setFolders((prev) => prev.map((f) => (
+        f.id === renamingFolder.id ? { ...f, name: nextName } : f
+      )));
+      showToast(`Renamed folder to "${nextName}"`, 'check-circle');
+      setRenamingFolder(null);
+      setRenameFolderInputVal('');
+    };
+    if (!currentUser?.email) {
+      apply();
+      return;
+    }
+    try {
+      await api.folders.patch(renamingFolder.id, {
+        email: currentUser.email,
+        name: nextName,
+      });
+      apply();
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) apply();
+      else showToast(err.message || 'Could not rename folder', 'info');
+    }
   };
 
   const closeOrganizeModal = () => {
@@ -2963,13 +3030,28 @@ function App() {
                                           <ChevronRight size={14} className="item-chevron-right" />
                                         </button>
 
-                                        {workspaceCanWrite && (
+                                        {workspaceCanWrite && trashNavActive && (
+                                          <button
+                                            className="context-menu-item"
+                                            onClick={(e) => {
+                                              handleRestoreDocumentFromTrash(doc.id, doc.title, e);
+                                              setActiveMenuDocId(null);
+                                            }}
+                                          >
+                                            <div className="item-icon-box">
+                                              <RotateCcw size={16} />
+                                            </div>
+                                            <span className="item-label">Restore</span>
+                                          </button>
+                                        )}
+
+                                        {workspaceCanWrite && !trashNavActive && (
                                           <>
                                             <div className="context-menu-divider"></div>
                                             <button 
                                               className="context-menu-item"
                                               onClick={(e) => {
-                                                handleDeleteDocument(doc.id, doc.title, e);
+                                                handleMoveDocumentToTrash(doc.id, doc.title, e);
                                                 setActiveMenuDocId(null);
                                               }}
                                             >
@@ -3025,13 +3107,23 @@ function App() {
                                   <td>{doc.size}</td>
                                   {workspaceCanWrite && (
                                     <td style={{ textAlign: 'right' }}>
-                                      <button 
-                                        className="table-action-icon"
-                                        onClick={(e) => handleDeleteDocument(doc.id, doc.title, e)}
-                                        title="Delete"
-                                      >
-                                        <Trash2 size={16} />
-                                      </button>
+                                      {trashNavActive ? (
+                                        <button
+                                          className="table-action-icon"
+                                          onClick={(e) => handleRestoreDocumentFromTrash(doc.id, doc.title, e)}
+                                          title="Restore"
+                                        >
+                                          <RotateCcw size={16} />
+                                        </button>
+                                      ) : (
+                                        <button 
+                                          className="table-action-icon"
+                                          onClick={(e) => handleMoveDocumentToTrash(doc.id, doc.title, e)}
+                                          title="Move to trash"
+                                        >
+                                          <Trash2 size={16} />
+                                        </button>
+                                      )}
                                     </td>
                                   )}
                                 </tr>

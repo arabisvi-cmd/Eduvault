@@ -32,10 +32,12 @@ CREATE TABLE IF NOT EXISTS documents (
     role TEXT,
     folder_id TEXT,
     vault_section_id TEXT,
+    deleted_at DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_deleted_at ON documents(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_documents_vault_section ON documents(vault_section_id);
 
 CREATE TABLE IF NOT EXISTS vault_sections (

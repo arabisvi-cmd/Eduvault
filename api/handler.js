@@ -154,12 +154,14 @@ export async function handleApi(request, env) {
   try {
     if (path === '/documents' && request.method === 'GET') {
       const institutionId = url.searchParams.get('institution_id') || '';
+      const trashView = url.searchParams.get('trash') === '1';
+      const deletedClause = trashView ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL';
       const { results } = institutionId
         ? await env.DB.prepare(
-            'SELECT * FROM documents WHERE institution = ? ORDER BY created_at DESC LIMIT 200'
+            `SELECT * FROM documents WHERE institution = ? AND ${deletedClause} ORDER BY created_at DESC LIMIT 200`
           ).bind(institutionId).all()
         : await env.DB.prepare(
-            'SELECT * FROM documents ORDER BY created_at DESC LIMIT 200'
+            `SELECT * FROM documents WHERE ${deletedClause} ORDER BY created_at DESC LIMIT 200`
           ).all();
       return jsonResponse({ data: results || [] });
     }
@@ -216,6 +218,10 @@ export async function handleApi(request, env) {
       let vaultSectionId = body.vault_section_id !== undefined
         ? (body.vault_section_id || body.vaultSectionId || null)
         : existing.vault_section_id;
+      const title = body.title !== undefined ? String(body.title).trim() : existing.title;
+      let deletedAt = existing.deleted_at;
+      if (body.trash === true) deletedAt = new Date().toISOString();
+      if (body.restore === true) deletedAt = null;
 
       if (body.folder_id !== undefined || body.folderId !== undefined) {
         const fid = folderId;
@@ -227,12 +233,19 @@ export async function handleApi(request, env) {
       }
 
       await env.DB.prepare(
-        'UPDATE documents SET folder_id = ?, vault_section_id = ? WHERE id = ?'
-      ).bind(folderId, vaultSectionId, documentPatchId).run();
+        `UPDATE documents SET folder_id = ?, vault_section_id = ?, title = ?, deleted_at = ?
+         WHERE id = ?`
+      ).bind(folderId, vaultSectionId, title || existing.title, deletedAt, documentPatchId).run();
 
       return jsonResponse({
         success: true,
-        data: { ...existing, folder_id: folderId, vault_section_id: vaultSectionId },
+        data: {
+          ...existing,
+          title: title || existing.title,
+          folder_id: folderId,
+          vault_section_id: vaultSectionId,
+          deleted_at: deletedAt,
+        },
       });
     }
 

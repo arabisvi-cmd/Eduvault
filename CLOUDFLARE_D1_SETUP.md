@@ -98,6 +98,8 @@ npx wrangler d1 execute eduvault-db --local --file=./d1-migrate-documents-vault-
 
 If that fails with **duplicate column name: vault_section_id**, the column is already there — you are done.
 
+Run [d1-migrate-documents-trash.sql](./d1-migrate-documents-trash.sql) once for workspace trash (`deleted_at` on documents).
+
 ---
 
 ## 4. Deploy EduVault to Cloudflare Pages
