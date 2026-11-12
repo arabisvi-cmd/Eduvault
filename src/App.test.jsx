@@ -28,6 +28,17 @@ vi.mock('./lib/api', () => ({
     documents: {
       list: vi.fn().mockResolvedValue([]),
       create: vi.fn().mockResolvedValue({}),
+      patch: vi.fn().mockResolvedValue({}),
+    },
+    vaultSections: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      delete: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+    },
+    folders: {
+      list: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
+      patch: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
     },
   },
 }));
@@ -142,8 +153,8 @@ describe('EduVault App Rendering & Navigation tests', () => {
 
     expect(screen.getByTestId('workspace-context-title')).toHaveTextContent(/St\. Xavier High School/);
     expect(screen.getByTestId('workspace-context-title')).toHaveTextContent(/Physics/);
-    expect(screen.getByText('Suggested folders')).toBeInTheDocument();
-    expect(screen.getByText('Suggested files')).toBeInTheDocument();
+    expect(screen.getByText('Folders')).toBeInTheDocument();
+    expect(screen.getByText('Files')).toBeInTheDocument();
     
     // Check for academic folders
     expect(screen.getByText('Physics Lecture Slides')).toBeInTheDocument();
@@ -187,11 +198,11 @@ describe('EduVault App Rendering & Navigation tests', () => {
     // Click the Back button
     fireEvent.click(backBtn);
 
-    // Verify we are back on root and suggested folders are visible
-    expect(screen.getByText('Suggested folders')).toBeInTheDocument();
+    // Verify we are back on root and folders section is visible
+    expect(screen.getByText('Folders')).toBeInTheDocument();
   });
 
-  it('should show inline folder card in Suggested folders when clicking New folder', async () => {
+  it('should show inline folder card in Folders when clicking New folder', async () => {
     renderApp();
     await loginTestUser();
 
@@ -213,8 +224,9 @@ describe('EduVault App Rendering & Navigation tests', () => {
     const checkBtn = screen.getByTitle(/Create folder/i);
     fireEvent.click(checkBtn);
 
-    // Verify new folder appears in the folders list
-    expect(screen.getByText('Biology Field Work')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('Biology Field Work')).toBeInTheDocument();
+    });
   });
 
   it('should display file action options matching reference image when clicking 3 dots on a file card', async () => {
@@ -260,11 +272,11 @@ describe('EduVault App Rendering & Navigation tests', () => {
     expect(screen.getByText('Download')).toBeInTheDocument();
     expect(screen.getByText('Rename')).toBeInTheDocument();
     expect(screen.getByText('Share')).toBeInTheDocument();
+    expect(screen.getByText('Organize')).toBeInTheDocument();
     expect(screen.getByText('Folder information')).toBeInTheDocument();
     expect(screen.getByText('Move to trash')).toBeInTheDocument();
 
     // Verify excluded options are not present
-    expect(screen.queryByText('Organize')).not.toBeInTheDocument();
     expect(screen.queryByText('Open with')).not.toBeInTheDocument();
     expect(screen.queryByText('Make a copy')).not.toBeInTheDocument();
 

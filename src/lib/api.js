@@ -116,11 +116,11 @@ export const api = {
 
   // Documents
   documents: {
-    async list() {
-      const res = await safeFetch(`${API_BASE}/documents`);
-      if (!res.ok) throw new Error('Failed to fetch documents');
-      const json = await res.json();
-      return json.data || [];
+    async list(institutionId) {
+      const qs = institutionId ? `?institution_id=${encodeURIComponent(institutionId)}` : '';
+      const res = await safeFetch(`${API_BASE}/documents${qs}`);
+      const data = await parseApiJson(res);
+      return data.data || [];
     },
 
     async create(doc) {
@@ -129,9 +129,77 @@ export const api = {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(doc),
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed to save document');
-      return json.data;
-    }
-  }
+      const data = await parseApiJson(res);
+      return data.data;
+    },
+
+    async patch(id, payload) {
+      const res = await safeFetch(`${API_BASE}/documents/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseApiJson(res);
+      return data.data;
+    },
+  },
+
+  vaultSections: {
+    async list(institutionId) {
+      const res = await safeFetch(
+        `${API_BASE}/vault-sections?institution_id=${encodeURIComponent(institutionId)}`
+      );
+      const data = await parseApiJson(res);
+      return data.data || [];
+    },
+
+    async create({ email, institution_id, name }) {
+      const res = await safeFetch(`${API_BASE}/vault-sections`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, institution_id, name }),
+      });
+      const data = await parseApiJson(res);
+      return data.data;
+    },
+
+    async delete({ email, password, id, institution_id }) {
+      const res = await safeFetch(`${API_BASE}/vault-sections/delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, id, institution_id }),
+      });
+      return parseApiJson(res);
+    },
+  },
+
+  folders: {
+    async list(institutionId) {
+      const res = await safeFetch(
+        `${API_BASE}/folders?institution_id=${encodeURIComponent(institutionId)}`
+      );
+      const data = await parseApiJson(res);
+      return data.data || [];
+    },
+
+    async create(payload) {
+      const res = await safeFetch(`${API_BASE}/folders`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseApiJson(res);
+      return data.data;
+    },
+
+    async patch(id, payload) {
+      const res = await safeFetch(`${API_BASE}/folders/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await parseApiJson(res);
+      return data.data;
+    },
+  },
 };

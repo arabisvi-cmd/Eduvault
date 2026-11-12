@@ -31,10 +31,37 @@ CREATE TABLE IF NOT EXISTS documents (
     section TEXT,
     role TEXT,
     folder_id TEXT,
+    vault_section_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_created_at ON documents(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_documents_vault_section ON documents(vault_section_id);
+
+CREATE TABLE IF NOT EXISTS vault_sections (
+    id TEXT PRIMARY KEY,
+    institution_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_vault_sections_institution ON vault_sections(institution_id);
+
+CREATE TABLE IF NOT EXISTS folders (
+    id TEXT PRIMARY KEY,
+    institution_id TEXT NOT NULL,
+    vault_section_id TEXT,
+    parent_folder_id TEXT,
+    name TEXT NOT NULL,
+    path_label TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_folders_institution ON folders(institution_id);
+CREATE INDEX IF NOT EXISTS idx_folders_vault_section ON folders(vault_section_id);
+CREATE INDEX IF NOT EXISTS idx_folders_parent ON folders(parent_folder_id);
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 
 -- School roster: only emails listed here may register; user_type is assigned at signup (never self-selected).

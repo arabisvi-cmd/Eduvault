@@ -84,6 +84,22 @@ VALUES ('you@school.edu', 'teacher', 'inst-1');
 
 ---
 
+## 3c. Vault sections & folders (workspace structure)
+
+After the base schema, run [d1-migrate-vault-structure.sql](./d1-migrate-vault-structure.sql) once (local and remote), same wrangler `d1 execute` commands as in §3b.
+
+This adds `vault_sections`, `folders`, and default **inst-1** library folders (safe to re-run).
+
+On an **older** `documents` table without `vault_section_id`, also run once:
+
+```bash
+npx wrangler d1 execute eduvault-db --local --file=./d1-migrate-documents-vault-section-id.sql
+```
+
+If that fails with **duplicate column name: vault_section_id**, the column is already there — you are done.
+
+---
+
 ## 4. Deploy EduVault to Cloudflare Pages
 1. Go to **Workers & Pages** in your Cloudflare sidebar.
 2. Click **Create Application** → select the **Pages** tab → **Connect to Git**.

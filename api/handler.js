@@ -4,7 +4,7 @@ function jsonResponse(data, status = 200) {
     headers: {
       'Content-Type': 'application/json',
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     },
   });
@@ -15,6 +15,63 @@ const ALLOWED_USER_TYPES = new Set(['admin', 'teacher', 'student', 'non_teaching
 function normalizeUserType(value) {
   const key = String(value || '').trim().toLowerCase().replace(/\s+/g, '_');
   return ALLOWED_USER_TYPES.has(key) ? key : null;
+}
+
+function canWriteWorkspace(user) {
+  const t = normalizeUserType(user?.user_type);
+  return t === 'admin' || t === 'teacher';
+}
+
+async function requireUserByEmail(env, email) {
+  const normalized = String(email || '').toLowerCase().trim();
+  if (!normalized) return null;
+  return env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(normalized).first();
+}
+
+async function verifyUserPassword(env, user, password) {
+  const { hash } = await hashPassword(password, user.salt);
+  return hash === user.password_hash;
+}
+
+function pathSuffixId(path, prefix) {
+  if (!path.startsWith(`${prefix}/`)) return null;
+  const id = path.slice(prefix.length + 1);
+  return id && !id.includes('/') ? id : null;
+}
+
+function mapVaultSectionRow(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    institution_id: row.institution_id,
+    sort_order: row.sort_order ?? 0,
+  };
+}
+
+function mapFolderRow(row) {
+  return {
+    id: row.id,
+    institution_id: row.institution_id,
+    vault_section_id: row.vault_section_id || null,
+    parent_folder_id: row.parent_folder_id || null,
+    name: row.name,
+    path_label: row.path_label || '',
+  };
+}
+
+async function isFolderCycle(env, folderId, newParentId) {
+  if (!newParentId || newParentId === folderId) return true;
+  let currentId = newParentId;
+  const seen = new Set();
+  while (currentId) {
+    if (currentId === folderId) return true;
+    if (seen.has(currentId)) break;
+    seen.add(currentId);
+    const row = await env.DB.prepare('SELECT parent_folder_id FROM folders WHERE id = ?').bind(currentId).first();
+    if (!row) break;
+    currentId = row.parent_folder_id;
+  }
+  return false;
 }
 
 function publicUser(row) {
@@ -84,7 +141,7 @@ export async function handleApi(request, env) {
       status: 204,
       headers: {
         'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
         'Access-Control-Allow-Headers': 'Content-Type, Authorization',
       },
     });
@@ -96,36 +153,249 @@ export async function handleApi(request, env) {
 
   try {
     if (path === '/documents' && request.method === 'GET') {
-      const { results } = await env.DB.prepare(
-        'SELECT * FROM documents ORDER BY created_at DESC LIMIT 100'
-      ).all();
+      const institutionId = url.searchParams.get('institution_id') || '';
+      const { results } = institutionId
+        ? await env.DB.prepare(
+            'SELECT * FROM documents WHERE institution = ? ORDER BY created_at DESC LIMIT 200'
+          ).bind(institutionId).all()
+        : await env.DB.prepare(
+            'SELECT * FROM documents ORDER BY created_at DESC LIMIT 200'
+          ).all();
       return jsonResponse({ data: results || [] });
     }
 
     if (path === '/documents' && request.method === 'POST') {
       const body = await request.json();
+      const actor = await requireUserByEmail(env, body.email);
+      if (!actor) {
+        return jsonResponse({ error: 'Valid email is required to upload documents' }, 401);
+      }
+      if (!canWriteWorkspace(actor)) {
+        return jsonResponse({ error: 'You have read-only access' }, 403);
+      }
       const id = body.id || `doc-${Date.now()}`;
+      const folderId = body.folder_id || body.folderId || null;
+      const vaultSectionId = body.vault_section_id || body.vaultSectionId || null;
       await env.DB.prepare(
         `INSERT INTO documents (
-          id, title, institution, academic_year, class_grade, subject, timeline, file_type, file_size, owner, section, role, folder_id
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          id, title, institution, academic_year, class_grade, subject, timeline, file_type, file_size, owner, section, role, folder_id, vault_section_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         id,
         body.title || 'Untitled Document',
-        body.institution || '',
+        body.institution || actor.institution || '',
         body.academic_year || body.year || '',
         body.class_grade || body.class || '',
         body.subject || '',
         body.timeline || '',
         body.file_type || body.type || 'pdf',
         body.file_size || body.size || '1.0 MB',
-        body.owner || 'me',
+        body.owner || actor.email,
         body.section || 'Section A',
         body.role || 'students',
-        body.folder_id || body.folderId || null
+        folderId,
+        vaultSectionId
       ).run();
 
-      return jsonResponse({ success: true, data: { id, ...body } });
+      return jsonResponse({ success: true, data: { id, ...body, folder_id: folderId, vault_section_id: vaultSectionId } });
+    }
+
+    const documentPatchId = pathSuffixId(path, '/documents');
+    if (documentPatchId && request.method === 'PATCH') {
+      const body = await request.json();
+      const actor = await requireUserByEmail(env, body.email);
+      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
+
+      const existing = await env.DB.prepare('SELECT * FROM documents WHERE id = ?').bind(documentPatchId).first();
+      if (!existing) return jsonResponse({ error: 'Document not found' }, 404);
+
+      const folderId = body.folder_id !== undefined
+        ? (body.folder_id || body.folderId || null)
+        : existing.folder_id;
+      let vaultSectionId = body.vault_section_id !== undefined
+        ? (body.vault_section_id || body.vaultSectionId || null)
+        : existing.vault_section_id;
+
+      if (body.folder_id !== undefined || body.folderId !== undefined) {
+        const fid = folderId;
+        if (fid) {
+          const folder = await env.DB.prepare('SELECT vault_section_id FROM folders WHERE id = ?').bind(fid).first();
+          if (!folder) return jsonResponse({ error: 'Destination folder not found' }, 400);
+          vaultSectionId = folder.vault_section_id || null;
+        }
+      }
+
+      await env.DB.prepare(
+        'UPDATE documents SET folder_id = ?, vault_section_id = ? WHERE id = ?'
+      ).bind(folderId, vaultSectionId, documentPatchId).run();
+
+      return jsonResponse({
+        success: true,
+        data: { ...existing, folder_id: folderId, vault_section_id: vaultSectionId },
+      });
+    }
+
+    if (path === '/vault-sections' && request.method === 'GET') {
+      const institutionId = url.searchParams.get('institution_id') || '';
+      if (!institutionId) return jsonResponse({ error: 'institution_id is required' }, 400);
+      const { results } = await env.DB.prepare(
+        'SELECT * FROM vault_sections WHERE institution_id = ? ORDER BY sort_order ASC, created_at ASC'
+      ).bind(institutionId).all();
+      return jsonResponse({ data: (results || []).map(mapVaultSectionRow) });
+    }
+
+    if (path === '/vault-sections' && request.method === 'POST') {
+      const body = await request.json();
+      const actor = await requireUserByEmail(env, body.email);
+      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
+
+      const name = String(body.name || '').trim();
+      const institutionId = body.institution_id || body.institutionId || actor.institution || '';
+      if (!name || !institutionId) {
+        return jsonResponse({ error: 'name and institution_id are required' }, 400);
+      }
+
+      const id = body.id || `section-${Date.now()}`;
+      await env.DB.prepare(
+        `INSERT INTO vault_sections (id, institution_id, name, sort_order, created_by)
+         VALUES (?, ?, ?, ?, ?)`
+      ).bind(id, institutionId, name, Number(body.sort_order) || 0, actor.id).run();
+
+      return jsonResponse({ success: true, data: mapVaultSectionRow({ id, institution_id: institutionId, name, sort_order: 0 }) });
+    }
+
+    if (path === '/vault-sections/delete' && request.method === 'POST') {
+      const body = await request.json();
+      const actor = await requireUserByEmail(env, body.email);
+      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
+      if (!body.password || !(await verifyUserPassword(env, actor, body.password))) {
+        return jsonResponse({ error: 'Password is incorrect' }, 401);
+      }
+
+      const sectionId = body.id;
+      if (!sectionId) return jsonResponse({ error: 'Section id is required' }, 400);
+
+      const section = await env.DB.prepare(
+        'SELECT id FROM vault_sections WHERE id = ? AND institution_id = ?'
+      ).bind(sectionId, body.institution_id || body.institutionId || actor.institution || '').first();
+      if (!section) return jsonResponse({ error: 'Section not found' }, 404);
+
+      await env.DB.batch([
+        env.DB.prepare(
+          `DELETE FROM documents WHERE vault_section_id = ?
+           OR folder_id IN (SELECT id FROM folders WHERE vault_section_id = ?)`
+        ).bind(sectionId, sectionId),
+        env.DB.prepare('DELETE FROM folders WHERE vault_section_id = ?').bind(sectionId),
+        env.DB.prepare('DELETE FROM vault_sections WHERE id = ?').bind(sectionId),
+      ]);
+
+      return jsonResponse({ success: true });
+    }
+
+    if (path === '/folders' && request.method === 'GET') {
+      const institutionId = url.searchParams.get('institution_id') || '';
+      if (!institutionId) return jsonResponse({ error: 'institution_id is required' }, 400);
+      const { results } = await env.DB.prepare(
+        'SELECT * FROM folders WHERE institution_id = ? ORDER BY created_at DESC'
+      ).bind(institutionId).all();
+      return jsonResponse({ data: (results || []).map(mapFolderRow) });
+    }
+
+    if (path === '/folders' && request.method === 'POST') {
+      const body = await request.json();
+      const actor = await requireUserByEmail(env, body.email);
+      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
+
+      const name = String(body.name || '').trim();
+      const institutionId = body.institution_id || body.institutionId || actor.institution || '';
+      if (!name || !institutionId) {
+        return jsonResponse({ error: 'name and institution_id are required' }, 400);
+      }
+
+      const parentFolderId = body.parent_folder_id || body.parentFolderId || null;
+      let vaultSectionId = body.vault_section_id || body.vaultSectionId || null;
+
+      if (parentFolderId) {
+        const parent = await env.DB.prepare('SELECT institution_id, vault_section_id FROM folders WHERE id = ?')
+          .bind(parentFolderId).first();
+        if (!parent || parent.institution_id !== institutionId) {
+          return jsonResponse({ error: 'Parent folder not found' }, 400);
+        }
+        vaultSectionId = parent.vault_section_id || null;
+      }
+
+      const id = body.id || `folder-${Date.now()}`;
+      const pathLabel = body.path_label || body.path || '';
+
+      await env.DB.prepare(
+        `INSERT INTO folders (id, institution_id, vault_section_id, parent_folder_id, name, path_label)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      ).bind(id, institutionId, vaultSectionId, parentFolderId, name, pathLabel).run();
+
+      return jsonResponse({
+        success: true,
+        data: mapFolderRow({
+          id,
+          institution_id: institutionId,
+          vault_section_id: vaultSectionId,
+          parent_folder_id: parentFolderId,
+          name,
+          path_label: pathLabel,
+        }),
+      });
+    }
+
+    const folderPatchId = pathSuffixId(path, '/folders');
+    if (folderPatchId && request.method === 'PATCH') {
+      const body = await request.json();
+      const actor = await requireUserByEmail(env, body.email);
+      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
+
+      const existing = await env.DB.prepare('SELECT * FROM folders WHERE id = ?').bind(folderPatchId).first();
+      if (!existing) return jsonResponse({ error: 'Folder not found' }, 404);
+
+      const parentFolderId = body.parent_folder_id !== undefined
+        ? (body.parent_folder_id || body.parentFolderId || null)
+        : existing.parent_folder_id;
+      let vaultSectionId = body.vault_section_id !== undefined
+        ? (body.vault_section_id || body.vaultSectionId || null)
+        : existing.vault_section_id;
+
+      if (body.parent_folder_id !== undefined || body.parentFolderId !== undefined) {
+        if (parentFolderId && await isFolderCycle(env, folderPatchId, parentFolderId)) {
+          return jsonResponse({ error: 'Invalid folder move' }, 400);
+        }
+        if (parentFolderId) {
+          const parent = await env.DB.prepare('SELECT vault_section_id FROM folders WHERE id = ?')
+            .bind(parentFolderId).first();
+          if (!parent) return jsonResponse({ error: 'Parent folder not found' }, 400);
+          vaultSectionId = parent.vault_section_id || null;
+        } else if (body.vault_section_id !== undefined || body.vaultSectionId !== undefined) {
+          vaultSectionId = body.vault_section_id || body.vaultSectionId || null;
+        }
+      }
+
+      const name = body.name !== undefined ? String(body.name).trim() : existing.name;
+
+      await env.DB.prepare(
+        `UPDATE folders SET parent_folder_id = ?, vault_section_id = ?, name = ?
+         WHERE id = ?`
+      ).bind(parentFolderId, vaultSectionId, name || existing.name, folderPatchId).run();
+
+      return jsonResponse({
+        success: true,
+        data: mapFolderRow({
+          ...existing,
+          parent_folder_id: parentFolderId,
+          vault_section_id: vaultSectionId,
+          name: name || existing.name,
+        }),
+      });
     }
 
     if (path === '/auth/signup' && request.method === 'POST') {

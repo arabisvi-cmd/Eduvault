@@ -323,6 +323,58 @@ const USER_TYPE_LABELS = {
 
 const VIEW_AS_USER_TYPES = ['admin', 'teacher', 'non_teaching_staff', 'student'];
 
+const VAULT_SECTION_SUGGESTIONS = [
+  'Textbooks',
+  'Notebooks',
+  'Question papers',
+  'Circulars',
+  'Other staff',
+];
+
+function getSelectedVaultSectionId(selectedNav) {
+  if (!selectedNav?.startsWith('section:')) return null;
+  return selectedNav.slice('section:'.length);
+}
+
+function matchesVaultSectionFilter(selectedNav, vaultSectionId) {
+  const activeSection = getSelectedVaultSectionId(selectedNav);
+  if (!activeSection) return true;
+  return vaultSectionId === activeSection;
+}
+
+const ORGANIZE_LIBRARY_SECTION = '__library__';
+
+function folderInOrganizeSection(folder, sectionKey) {
+  if (sectionKey === ORGANIZE_LIBRARY_SECTION) return !folder.vaultSectionId;
+  return folder.vaultSectionId === sectionKey;
+}
+
+function isFolderDescendantOf(folders, ancestorId, folderId) {
+  let current = folders.find((f) => f.id === folderId);
+  const seen = new Set();
+  while (current?.parentFolderId) {
+    if (current.parentFolderId === ancestorId) return true;
+    if (seen.has(current.parentFolderId)) break;
+    seen.add(current.parentFolderId);
+    current = folders.find((f) => f.id === current.parentFolderId);
+  }
+  return false;
+}
+
+function mapFolderFromApi(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    path: row.path_label || row.path || '',
+    vaultSectionId: row.vault_section_id || undefined,
+    parentFolderId: row.parent_folder_id || undefined,
+  };
+}
+
+function mapSectionFromApi(row) {
+  return { id: row.id, name: row.name };
+}
+
 function normalizeUserTypeKey(userType) {
   return String(userType || 'student').trim().toLowerCase().replace(/\s+/g, '_');
 }
@@ -464,13 +516,20 @@ function App() {
   }
 
   // Workspace specific states
-  const [selectedNav, setSelectedNav] = useState("home"); // 'home', 'my-vault', 'shared', 'recent', 'starred', 'trash'
+  const [selectedNav, setSelectedNav] = useState("home"); // 'home', 'shared', 'recent', 'starred', 'trash', section:*
   const [workspaceViewMode, setWorkspaceViewMode] = useState("grid"); // 'grid' | 'list'
   const [showNewDropdown, setShowNewDropdown] = useState(false);
   const [suggestedFoldersOpen, setSuggestedFoldersOpen] = useState(true);
   const [suggestedFilesOpen, setSuggestedFilesOpen] = useState(true);
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
   const [workspaceSidebarOpen, setWorkspaceSidebarOpen] = useState(true);
+  const [vaultSections, setVaultSections] = useState([]);
+  const [showNewSectionModal, setShowNewSectionModal] = useState(false);
+  const [newSectionNameInput, setNewSectionNameInput] = useState('');
+  const [sectionToDelete, setSectionToDelete] = useState(null);
+  const [deleteSectionPassword, setDeleteSectionPassword] = useState('');
+  const [deleteSectionError, setDeleteSectionError] = useState('');
+  const [sectionDeleteBusy, setSectionDeleteBusy] = useState(false);
   
   // Custom User Filters
   const [customFilters, setCustomFilters] = useState([]);
@@ -486,6 +545,8 @@ function App() {
   const [selectedFileForPreview, setSelectedFileForPreview] = useState(null);
   const [activeMenuDocId, setActiveMenuDocId] = useState(null);
   const [movingDoc, setMovingDoc] = useState(null);
+  const [movingFolder, setMovingFolder] = useState(null);
+  const [organizeModalSection, setOrganizeModalSection] = useState(null);
   const [sharingDoc, setSharingDoc] = useState(null);
   const [renamingDoc, setRenamingDoc] = useState(null);
   const [renameInputVal, setRenameInputVal] = useState("");
@@ -570,10 +631,41 @@ function App() {
     setRenamingDoc(null);
     setRenamingFolder(null);
     setMovingDoc(null);
+    setMovingFolder(null);
+    setOrganizeModalSection(null);
     setSharingDoc(null);
     setSharingFolder(null);
     if (selectedNav === 'trash') setSelectedNav('home');
   }, [currentUser, viewAsUserType, selectedNav]);
+
+  const workspaceInstitutionId = filterInst !== 'all' ? filterInst : (currentUser?.institution || 'inst-1');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [sections, folderRows] = await Promise.all([
+          api.vaultSections.list(workspaceInstitutionId),
+          api.folders.list(workspaceInstitutionId),
+        ]);
+        if (cancelled) return;
+        setVaultSections(sections.map(mapSectionFromApi));
+        if (folderRows.length > 0) {
+          setFolders(folderRows.map(mapFolderFromApi));
+        }
+      } catch {
+        // API offline: keep in-memory seed folders / sections
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [workspaceInstitutionId]);
+
+  useEffect(() => {
+    const activeId = getSelectedVaultSectionId(selectedNav);
+    if (activeId && !vaultSections.some((s) => s.id === activeId)) {
+      setSelectedNav('home');
+    }
+  }, [vaultSections, selectedNav]);
 
   useEffect(() => {
     const target = location.state?.scrollTo;
@@ -625,7 +717,8 @@ function App() {
     // 2. Load documents from Cloudflare D1 API, fallback to Supabase if configured
     async function loadDocuments() {
       try {
-        const d1Docs = await api.documents.list();
+        const instId = filterInst !== 'all' ? filterInst : 'inst-1';
+        const d1Docs = await api.documents.list(instId);
         if (d1Docs && d1Docs.length > 0) {
           const mappedDocs = d1Docs.map(doc => ({
             id: doc.id,
@@ -643,6 +736,7 @@ function App() {
             section: doc.section || "Section A",
             role: doc.role || "students",
             folderId: doc.folder_id || doc.folderId || null,
+            vaultSectionId: doc.vault_section_id || undefined,
             previewType: (doc.file_type || doc.type) === 'image' ? 'diagram-preview' : (doc.file_type || doc.type) === 'xlsx' ? 'sheet-preview' : (doc.file_type || doc.type) === 'code' ? 'code-preview' : 'pdf-text'
           }));
           setDocuments(mappedDocs);
@@ -712,7 +806,7 @@ function App() {
     return () => {
       subscription?.unsubscribe?.();
     };
-  }, []);
+  }, [filterInst]);
   const filteredDocs = documents.filter(doc => {
     if (filterInst !== 'all' && doc.institution !== filterInst) return false;
     if (filterYear !== 'all' && doc.year !== filterYear) return false;
@@ -740,6 +834,8 @@ function App() {
     if (activeFolderId !== null) {
       if (doc.folderId !== activeFolderId) return false;
     }
+
+    if (!matchesVaultSectionFilter(selectedNav, doc.vaultSectionId)) return false;
 
     // Sidebar Category Filter
     if (selectedNav === 'starred') {
@@ -789,6 +885,21 @@ function App() {
     return true;
   });
 
+  const activeVaultSectionId = getSelectedVaultSectionId(selectedNav);
+
+  const workspaceFolders = folders.filter((folder) =>
+    matchesVaultSectionFilter(selectedNav, folder.vaultSectionId) && !folder.parentFolderId
+  );
+
+  const workspaceChildFolders = activeFolderId
+    ? folders.filter(
+        (folder) => folder.parentFolderId === activeFolderId
+          && matchesVaultSectionFilter(selectedNav, folder.vaultSectionId)
+      )
+    : [];
+
+  const foldersForGrid = activeFolderId === null ? workspaceFolders : workspaceChildFolders;
+
   const handleWorkspaceFileUpload = async (e) => {
     if (!requireAuth()) {
       e.target.value = null;
@@ -836,12 +947,14 @@ function App() {
       section: "Section A",
       role: "students",
       folderId: activeFolderId,
+      vaultSectionId: activeVaultSectionId || undefined,
       previewType: type === 'image' ? 'diagram-preview' : type === 'xlsx' ? 'sheet-preview' : type === 'code' ? 'code-preview' : 'pdf-text'
     };
 
     // Attempt to persist to Cloudflare D1 API first
     try {
       const savedDoc = await api.documents.create({
+        email: currentUser?.email,
         title: newDoc.title,
         institution: newDoc.institution,
         academic_year: newDoc.year,
@@ -853,7 +966,8 @@ function App() {
         owner: newDoc.owner,
         section: newDoc.section,
         role: newDoc.role,
-        folder_id: newDoc.folderId
+        folder_id: newDoc.folderId,
+        vault_section_id: newDoc.vaultSectionId || null,
       });
       if (savedDoc?.id) {
         newDoc.id = savedDoc.id;
@@ -890,7 +1004,101 @@ function App() {
     e.target.value = null;
   };
 
-  const handleCreateFolder = (e) => {
+  const handleCreateVaultSection = async (e) => {
+    if (e) e.preventDefault();
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
+    const name = newSectionNameInput.trim();
+    if (!name || !currentUser?.email) return;
+    const applySection = (section) => {
+      setVaultSections((prev) => [...prev, section]);
+      setNewSectionNameInput('');
+      setShowNewSectionModal(false);
+      setShowNewDropdown(false);
+      setSelectedNav(`section:${section.id}`);
+      setActiveFolderId(null);
+      showToast(`Created section "${name}"`, 'check-circle');
+    };
+    try {
+      const created = await api.vaultSections.create({
+        email: currentUser.email,
+        institution_id: workspaceInstitutionId,
+        name,
+      });
+      applySection(mapSectionFromApi(created));
+    } catch (err) {
+      if (!shouldFallbackFromApi(err)) {
+        showToast(err.message || 'Could not create section', 'info');
+        return;
+      }
+      applySection({ id: `section-${Date.now()}`, name });
+    }
+  };
+
+  const openDeleteVaultSectionModal = (section) => {
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
+    setDeleteSectionPassword('');
+    setDeleteSectionError('');
+    setSectionToDelete(section);
+  };
+
+  const closeDeleteVaultSectionModal = () => {
+    if (sectionDeleteBusy) return;
+    setSectionToDelete(null);
+    setDeleteSectionPassword('');
+    setDeleteSectionError('');
+  };
+
+  const handleDeleteVaultSection = async (e) => {
+    e.preventDefault();
+    if (!sectionToDelete || !currentUser?.email) return;
+    if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
+    if (!deleteSectionPassword.trim()) {
+      setDeleteSectionError('Enter your password to confirm.');
+      return;
+    }
+    setSectionDeleteBusy(true);
+    setDeleteSectionError('');
+    try {
+      const sectionId = sectionToDelete.id;
+      try {
+        await api.vaultSections.delete({
+          email: currentUser.email,
+          password: deleteSectionPassword,
+          id: sectionId,
+          institution_id: workspaceInstitutionId,
+        });
+      } catch (err) {
+        if (shouldFallbackFromApi(err)) {
+          try {
+            await api.auth.login(currentUser.email, deleteSectionPassword);
+          } catch (loginErr) {
+            if (!shouldFallbackFromApi(loginErr)) {
+              setDeleteSectionError(loginErr.message || 'Password is incorrect.');
+              return;
+            }
+          }
+        } else {
+          setDeleteSectionError(err.message || 'Password is incorrect.');
+          return;
+        }
+      }
+      setVaultSections((prev) => prev.filter((s) => s.id !== sectionId));
+      setDocuments((prev) => prev.filter((d) => d.vaultSectionId !== sectionId));
+      setFolders((prev) => prev.filter((f) => f.vaultSectionId !== sectionId));
+      if (selectedNav === `section:${sectionId}`) {
+        setSelectedNav('home');
+        setActiveFolderId(null);
+      }
+      showToast(`Deleted section "${sectionToDelete.name}"`, 'info');
+      setSectionToDelete(null);
+      setDeleteSectionPassword('');
+      setDeleteSectionError('');
+    } finally {
+      setSectionDeleteBusy(false);
+    }
+  };
+
+  const handleCreateFolder = async (e) => {
     if (e) e.preventDefault();
     if (!canWriteWorkspace(currentUser, viewAsUserType)) return;
     if (!newFolderName.trim()) {
@@ -898,17 +1106,50 @@ function App() {
       return;
     }
 
-    const newFolder = {
-      id: `folder-${Date.now()}`,
-      name: newFolderName.trim(),
-      path: getFolderContextPath()
+    const folderName = newFolderName.trim();
+    const pathLabel = getFolderContextPath();
+    const applyFolder = (folder) => {
+      setFolders((prev) => [folder, ...prev]);
+      setNewFolderName('');
+      setIsCreatingFolder(false);
+      setShowNewDropdown(false);
+      showToast(`Created folder "${folder.name}"`, 'check-circle');
     };
 
-    setFolders([newFolder, ...folders]);
-    setNewFolderName("");
-    setIsCreatingFolder(false);
-    setShowNewDropdown(false);
-    showToast(`Created folder "${newFolder.name}"`, "check-circle");
+    if (!currentUser?.email) {
+      applyFolder({
+        id: `folder-${Date.now()}`,
+        name: folderName,
+        path: pathLabel,
+        vaultSectionId: activeVaultSectionId || undefined,
+        parentFolderId: activeFolderId || undefined,
+      });
+      return;
+    }
+
+    try {
+      const created = await api.folders.create({
+        email: currentUser.email,
+        institution_id: workspaceInstitutionId,
+        name: folderName,
+        path_label: pathLabel,
+        vault_section_id: activeVaultSectionId || null,
+        parent_folder_id: activeFolderId || null,
+      });
+      applyFolder(mapFolderFromApi(created));
+    } catch (err) {
+      if (!shouldFallbackFromApi(err)) {
+        showToast(err.message || 'Could not create folder', 'info');
+        return;
+      }
+      applyFolder({
+        id: `folder-${Date.now()}`,
+        name: folderName,
+        path: pathLabel,
+        vaultSectionId: activeVaultSectionId || undefined,
+        parentFolderId: activeFolderId || undefined,
+      });
+    }
   };
 
   const handleDeleteDocument = (id, title, e) => {
@@ -1012,6 +1253,144 @@ function App() {
     showToast(`Renamed folder to "${renameFolderInputVal.trim()}"`, "check-circle");
     setRenamingFolder(null);
     setRenameFolderInputVal("");
+  };
+
+  const closeOrganizeModal = () => {
+    setMovingDoc(null);
+    setMovingFolder(null);
+    setOrganizeModalSection(null);
+  };
+
+  const openOrganizeForDoc = (doc) => {
+    setMovingFolder(null);
+    setMovingDoc(doc);
+    setOrganizeModalSection(null);
+    setActiveMenuDocId(null);
+  };
+
+  const openOrganizeForFolder = (folder) => {
+    setMovingDoc(null);
+    setMovingFolder(folder);
+    setOrganizeModalSection(null);
+    setActiveMenuFolderId(null);
+  };
+
+  const vaultSectionIdFromOrganizeKey = (sectionKey) => (
+    sectionKey === ORGANIZE_LIBRARY_SECTION ? undefined : sectionKey
+  );
+
+  const handleOrganizeDocument = async (folderId, sectionKey) => {
+    if (!movingDoc || !canWriteWorkspace(currentUser, viewAsUserType)) return;
+    const targetFolder = folderId ? folders.find((f) => f.id === folderId) : null;
+    const vaultSectionId = targetFolder
+      ? targetFolder.vaultSectionId
+      : vaultSectionIdFromOrganizeKey(sectionKey);
+    const destLabel = targetFolder ? targetFolder.name : 'section root';
+    const apply = () => {
+      setDocuments((prev) => prev.map((d) => (
+        d.id === movingDoc.id ? { ...d, folderId: folderId || null, vaultSectionId } : d
+      )));
+      showToast(`Moved "${movingDoc.title}" to ${destLabel}`, 'check-circle');
+      closeOrganizeModal();
+    };
+    if (!currentUser?.email || typeof movingDoc.id === 'number') {
+      apply();
+      return;
+    }
+    try {
+      await api.documents.patch(movingDoc.id, {
+        email: currentUser.email,
+        folder_id: folderId || null,
+        vault_section_id: vaultSectionId || null,
+      });
+      apply();
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) apply();
+      else showToast(err.message || 'Could not move file', 'info');
+    }
+  };
+
+  const handleOrganizeFolder = async (parentFolderId, sectionKey) => {
+    if (!movingFolder || !canWriteWorkspace(currentUser, viewAsUserType)) return;
+    if (parentFolderId === movingFolder.id) return;
+    if (parentFolderId && isFolderDescendantOf(folders, movingFolder.id, parentFolderId)) {
+      showToast('Cannot move a folder into its own subfolder', 'info');
+      return;
+    }
+    const targetParent = parentFolderId ? folders.find((f) => f.id === parentFolderId) : null;
+    const vaultSectionId = targetParent
+      ? targetParent.vaultSectionId
+      : vaultSectionIdFromOrganizeKey(sectionKey);
+    const destLabel = targetParent ? targetParent.name : 'section root';
+    const apply = () => {
+      setFolders((prev) => prev.map((f) => (
+        f.id === movingFolder.id
+          ? { ...f, parentFolderId: parentFolderId || undefined, vaultSectionId }
+          : f
+      )));
+      showToast(`Moved folder "${movingFolder.name}" to ${destLabel}`, 'check-circle');
+      closeOrganizeModal();
+    };
+    if (!currentUser?.email) {
+      apply();
+      return;
+    }
+    try {
+      await api.folders.patch(movingFolder.id, {
+        email: currentUser.email,
+        parent_folder_id: parentFolderId || null,
+        vault_section_id: vaultSectionId || null,
+      });
+      apply();
+    } catch (err) {
+      if (shouldFallbackFromApi(err)) apply();
+      else showToast(err.message || 'Could not move folder', 'info');
+    }
+  };
+
+  const organizeSectionChoices = [
+    {
+      key: ORGANIZE_LIBRARY_SECTION,
+      name: 'Library',
+      folderCount: folders.filter((f) => folderInOrganizeSection(f, ORGANIZE_LIBRARY_SECTION)).length,
+    },
+    ...vaultSections.map((s) => ({
+      key: s.id,
+      name: s.name,
+      folderCount: folders.filter((f) => folderInOrganizeSection(f, s.id)).length,
+    })),
+  ];
+
+  const organizeFoldersInSection = (sectionKey) => {
+    let list = folders.filter((f) => folderInOrganizeSection(f, sectionKey));
+    if (movingFolder) {
+      list = list.filter(
+        (f) => f.id !== movingFolder.id && !isFolderDescendantOf(folders, movingFolder.id, f.id)
+      );
+    }
+    return list;
+  };
+
+  const organizeSectionLabel = (sectionKey) => (
+    sectionKey === ORGANIZE_LIBRARY_SECTION
+      ? 'Library'
+      : vaultSections.find((s) => s.id === sectionKey)?.name || 'Section'
+  );
+
+  const isDocAtOrganizeLocation = (folderId, sectionKey) => {
+    if (!movingDoc) return false;
+    const docSectionKey = movingDoc.vaultSectionId || ORGANIZE_LIBRARY_SECTION;
+    const atRoot = movingDoc.folderId == null && folderId == null;
+    const atFolder = movingDoc.folderId === folderId && folderId != null;
+    return docSectionKey === sectionKey && (atRoot || atFolder);
+  };
+
+  const isFolderAtOrganizeLocation = (parentFolderId, sectionKey) => {
+    if (!movingFolder) return false;
+    const folderSectionKey = movingFolder.vaultSectionId || ORGANIZE_LIBRARY_SECTION;
+    const atRoot = !movingFolder.parentFolderId && !parentFolderId;
+    const atParent = !!parentFolderId && movingFolder.parentFolderId === parentFolderId;
+    return folderSectionKey === sectionKey && (atRoot || atParent);
   };
 
   const goAfterAuth = () => {
@@ -1963,6 +2342,19 @@ function App() {
                       <UploadCloud size={18} />
                       <span>File upload</span>
                     </button>
+                    <div className="dropdown-divider"></div>
+                    <button
+                      type="button"
+                      className="dropdown-item"
+                      onClick={() => {
+                        setNewSectionNameInput('');
+                        setShowNewDropdown(false);
+                        setShowNewSectionModal(true);
+                      }}
+                    >
+                      <LayoutGrid size={18} />
+                      <span>New section</span>
+                    </button>
                   </div>
                 )}
 
@@ -1985,14 +2377,36 @@ function App() {
                   <span>Home</span>
                 </button>
 
-                <button 
-                  className={`gdrive-nav-item ${selectedNav === 'my-vault' ? 'active' : ''}`}
-                  onClick={() => { setSelectedNav('my-vault'); setActiveFolderId(null); }}
-                >
-                  <ChevronRight size={14} className="nav-chevron" />
-                  <HardDrive size={18} />
-                  <span>My Vault</span>
-                </button>
+                {vaultSections.map((section) => (
+                  <div key={section.id} className="gdrive-nav-section-row">
+                    <button
+                      type="button"
+                      className={`gdrive-nav-item gdrive-nav-item-section${selectedNav === `section:${section.id}` ? ' active' : ''}`}
+                      onClick={() => {
+                        setSelectedNav(`section:${section.id}`);
+                        setActiveFolderId(null);
+                      }}
+                    >
+                      <ChevronRight size={14} className="nav-chevron" />
+                      <LayoutGrid size={18} />
+                      <span>{section.name}</span>
+                    </button>
+                    {workspaceCanWrite && (
+                      <button
+                        type="button"
+                        className="vault-section-delete-btn"
+                        title={`Delete ${section.name}`}
+                        aria-label={`Delete section ${section.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDeleteVaultSectionModal(section);
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
 
                 <button 
                   className={`gdrive-nav-item ${selectedNav === 'shared' ? 'active' : ''}`}
@@ -2177,20 +2591,20 @@ function App() {
                   </div>
                 </div>
 
-                {/* Section 1: Suggested Folders */}
-                {activeFolderId === null && (
+                {/* Section 1: Folders */}
+                {(activeFolderId === null || workspaceChildFolders.length > 0) && (
                   <div className="gdrive-section">
                     <div 
                       className="gdrive-section-title"
                       onClick={() => setSuggestedFoldersOpen(!suggestedFoldersOpen)}
                     >
                       {suggestedFoldersOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                      <span>Suggested folders</span>
+                      <span>{activeFolderId ? 'Subfolders' : 'Folders'}</span>
                     </div>
 
                     {suggestedFoldersOpen && (
                       <div className="gdrive-folders-grid">
-                        {workspaceCanWrite && isCreatingFolder && (
+                        {workspaceCanWrite && isCreatingFolder && activeFolderId === null && (
                           <div className="gdrive-folder-card inline-create-folder-card" onClick={(e) => e.stopPropagation()}>
                             <div className="folder-icon-circle creating-icon">
                               <Folder size={18} />
@@ -2231,7 +2645,7 @@ function App() {
                           </div>
                         )}
 
-                        {folders.map(folder => (
+                        {foldersForGrid.map(folder => (
                           <div 
                             key={folder.id} 
                             className="gdrive-folder-card"
@@ -2306,6 +2720,17 @@ function App() {
                                         <span className="item-label">Share</span>
                                         <ChevronRight size={14} className="item-chevron-right" />
                                       </button>
+
+                                      <button
+                                        className="context-menu-item"
+                                        onClick={() => openOrganizeForFolder(folder)}
+                                      >
+                                        <div className="item-icon-box">
+                                          <Folder size={16} />
+                                        </div>
+                                        <span className="item-label">Organize</span>
+                                        <ChevronRight size={14} className="item-chevron-right" />
+                                      </button>
                                     </>
                                   )}
 
@@ -2360,7 +2785,7 @@ function App() {
                       onClick={() => setSuggestedFilesOpen(!suggestedFilesOpen)}
                     >
                       {suggestedFilesOpen ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
-                      <span>Suggested files</span>
+                      <span>Files</span>
                     </div>
 
                     {/* View Switcher (List vs Grid) */}
@@ -2512,10 +2937,7 @@ function App() {
 
                                             <button 
                                               className="context-menu-item"
-                                              onClick={() => {
-                                                setMovingDoc(doc);
-                                                setActiveMenuDocId(null);
-                                              }}
+                                              onClick={() => openOrganizeForDoc(doc)}
                                             >
                                               <div className="item-icon-box">
                                                 <Folder size={16} />
@@ -3108,37 +3530,99 @@ function App() {
         </div>
       )}
 
-      {/* Move File Modal */}
-      {movingDoc && (
-        <Modal title={`Move "${movingDoc.title}"`} icon={FolderInput} onClose={() => setMovingDoc(null)}>
+      {/* Organize file / folder modal */}
+      {(movingDoc || movingFolder) && (
+        <Modal
+          title={`Organize "${movingDoc?.title || movingFolder?.name}"`}
+          icon={FolderInput}
+          onClose={closeOrganizeModal}
+        >
           <div className="move-modal-body">
-            <p className="move-prompt-text">Choose a destination folder in your EduVault:</p>
-            <div className="move-folders-list">
-              <button 
-                className={`move-folder-option ${movingDoc.folderId === null ? 'current-location' : ''}`}
-                onClick={() => handleMoveDocument(null)}
-              >
-                <HardDrive size={18} />
-                <span>My Vault (Root)</span>
-                {movingDoc.folderId === null && <span className="current-badge">Current</span>}
-              </button>
-              
-              {folders.map(f => (
-                <button 
-                  key={f.id}
-                  className={`move-folder-option ${movingDoc.folderId === f.id ? 'current-location' : ''}`}
-                  onClick={() => handleMoveDocument(f.id)}
+            {organizeModalSection == null ? (
+              <>
+                <p className="move-prompt-text">Choose a section:</p>
+                <div className="move-folders-list">
+                  {organizeSectionChoices.map((section) => (
+                    <button
+                      key={section.key}
+                      type="button"
+                      className="move-folder-option move-section-option"
+                      onClick={() => setOrganizeModalSection(section.key)}
+                    >
+                      <LayoutGrid size={18} />
+                      <span>{section.name}</span>
+                      <span className="organize-section-count">
+                        {section.folderCount} folder{section.folderCount === 1 ? '' : 's'}
+                      </span>
+                      <ChevronRight size={16} className="organize-section-chevron" />
+                    </button>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className="organize-modal-back"
+                  onClick={() => setOrganizeModalSection(null)}
                 >
-                  <Folder size={18} />
-                  <span>{f.name}</span>
-                  {movingDoc.folderId === f.id && <span className="current-badge">Current</span>}
+                  <ArrowLeft size={16} />
+                  <span>{organizeSectionLabel(organizeModalSection)}</span>
                 </button>
-              ))}
-            </div>
+                <p className="move-prompt-text">Choose a folder:</p>
+                <div className="move-folders-list">
+                  <button
+                    type="button"
+                    className={`move-folder-option ${
+                      movingDoc
+                        ? isDocAtOrganizeLocation(null, organizeModalSection) ? 'current-location' : ''
+                        : isFolderAtOrganizeLocation(null, organizeModalSection) ? 'current-location' : ''
+                    }`}
+                    onClick={() => (
+                      movingDoc
+                        ? handleOrganizeDocument(null, organizeModalSection)
+                        : handleOrganizeFolder(null, organizeModalSection)
+                    )}
+                  >
+                    <HardDrive size={18} />
+                    <span>Section root</span>
+                    {(movingDoc
+                      ? isDocAtOrganizeLocation(null, organizeModalSection)
+                      : isFolderAtOrganizeLocation(null, organizeModalSection)) && (
+                      <span className="current-badge">Current</span>
+                    )}
+                  </button>
+                  {organizeFoldersInSection(organizeModalSection).map((f) => (
+                    <button
+                      key={f.id}
+                      type="button"
+                      className={`move-folder-option ${
+                        movingDoc
+                          ? isDocAtOrganizeLocation(f.id, organizeModalSection) ? 'current-location' : ''
+                          : isFolderAtOrganizeLocation(f.id, organizeModalSection) ? 'current-location' : ''
+                      }`}
+                      onClick={() => (
+                        movingDoc
+                          ? handleOrganizeDocument(f.id, organizeModalSection)
+                          : handleOrganizeFolder(f.id, organizeModalSection)
+                      )}
+                    >
+                      <Folder size={18} />
+                      <span>{f.name}</span>
+                      {(movingDoc
+                        ? isDocAtOrganizeLocation(f.id, organizeModalSection)
+                        : isFolderAtOrganizeLocation(f.id, organizeModalSection)) && (
+                        <span className="current-badge">Current</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
 
           <div className="modal-actions-footer">
-            <button className="btn btn-secondary btn-sm" onClick={() => setMovingDoc(null)}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={closeOrganizeModal}>
               Cancel
             </button>
           </div>
@@ -3287,6 +3771,107 @@ function App() {
               Done
             </button>
           </div>
+        </Modal>
+      )}
+
+      {sectionToDelete && (
+        <div
+          className="logout-confirm-overlay"
+          onClick={closeDeleteVaultSectionModal}
+          role="presentation"
+        >
+          <div
+            className="logout-confirm-dialog account-delete-dialog"
+            role="dialog"
+            aria-labelledby="delete-section-title"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="logout-confirm-close"
+              onClick={closeDeleteVaultSectionModal}
+              aria-label="Close"
+              disabled={sectionDeleteBusy}
+            >
+              <X size={18} />
+            </button>
+            <h2 id="delete-section-title">Delete &quot;{sectionToDelete.name}&quot;?</h2>
+            <p className="account-delete-dialog-copy">
+              All folders and files in this section will be permanently removed. This cannot be undone.
+            </p>
+            {deleteSectionError ? <p className="auth-error" role="alert">{deleteSectionError}</p> : null}
+            <form onSubmit={handleDeleteVaultSection} className="account-delete-form auth-form">
+              <div className="form-group">
+                <label htmlFor="delete-section-password">Password</label>
+                <div className="input-wrapper">
+                  <Lock size={16} />
+                  <input
+                    id="delete-section-password"
+                    type="password"
+                    autoComplete="current-password"
+                    value={deleteSectionPassword}
+                    onChange={(e) => setDeleteSectionPassword(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="logout-confirm-actions">
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={closeDeleteVaultSectionModal}
+                  disabled={sectionDeleteBusy}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary account-delete-btn" disabled={sectionDeleteBusy}>
+                  {sectionDeleteBusy ? 'Deleting…' : 'Delete section'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showNewSectionModal && (
+        <Modal title="Create vault section" icon={LayoutGrid} onClose={() => setShowNewSectionModal(false)}>
+          <form onSubmit={handleCreateVaultSection} className="vault-section-form">
+            <div className="move-modal-body">
+              <label className="vault-section-label" htmlFor="vault-section-name">Section name</label>
+              <input
+                id="vault-section-name"
+                type="text"
+                className="share-select"
+                placeholder="e.g. Textbooks"
+                value={newSectionNameInput}
+                onChange={(e) => setNewSectionNameInput(e.target.value)}
+                required
+                autoFocus
+              />
+              <p className="vault-section-hint">Quick ideas (admin & teacher only):</p>
+              <div className="vault-section-suggestions">
+                {VAULT_SECTION_SUGGESTIONS.map((name) => (
+                  <button
+                    key={name}
+                    type="button"
+                    className="vault-section-suggestion-chip"
+                    onClick={() => setNewSectionNameInput(name)}
+                  >
+                    {name}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="modal-actions-footer">
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowNewSectionModal(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary btn-sm">
+                Create section
+              </button>
+            </div>
+          </form>
         </Modal>
       )}
 
