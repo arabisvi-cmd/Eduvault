@@ -950,7 +950,6 @@ function App() {
     // Attempt to persist to Cloudflare D1 API first
     try {
       const savedDoc = await api.documents.create({
-        email: currentUser?.email,
         title: newDoc.title,
         institution: newDoc.institution,
         academic_year: newDoc.year,
@@ -1016,7 +1015,6 @@ function App() {
     };
     try {
       const created = await api.vaultSections.create({
-        email: currentUser.email,
         institution_id: workspaceInstitutionId,
         name,
       });
@@ -1058,7 +1056,6 @@ function App() {
       const sectionId = sectionToDelete.id;
       try {
         await api.vaultSections.delete({
-          email: currentUser.email,
           password: deleteSectionPassword,
           id: sectionId,
           institution_id: workspaceInstitutionId,
@@ -1125,7 +1122,6 @@ function App() {
 
     try {
       const created = await api.folders.create({
-        email: currentUser.email,
         institution_id: workspaceInstitutionId,
         name: folderName,
         path_label: pathLabel,
@@ -1161,7 +1157,7 @@ function App() {
       return;
     }
     try {
-      await api.documents.patch(id, { email: currentUser.email, trash: true });
+      await api.documents.patch(id, { trash: true });
       removeFromView();
     } catch (err) {
       if (shouldFallbackFromApi(err)) {
@@ -1185,7 +1181,7 @@ function App() {
       return;
     }
     try {
-      await api.documents.patch(id, { email: currentUser.email, restore: true });
+      await api.documents.patch(id, { restore: true });
       removeFromView();
     } catch (err) {
       if (shouldFallbackFromApi(err)) removeFromView();
@@ -1285,7 +1281,7 @@ function App() {
       return;
     }
     try {
-      await api.documents.patch(renamingDoc.id, { email: currentUser.email, title: nextTitle });
+      await api.documents.patch(renamingDoc.id, { title: nextTitle });
       apply();
     } catch (err) {
       if (shouldFallbackFromApi(err)) apply();
@@ -1311,10 +1307,7 @@ function App() {
       return;
     }
     try {
-      await api.folders.patch(renamingFolder.id, {
-        email: currentUser.email,
-        name: nextName,
-      });
+      await api.folders.patch(renamingFolder.id, { name: nextName });
       apply();
     } catch (err) {
       if (shouldFallbackFromApi(err)) apply();
@@ -1366,7 +1359,6 @@ function App() {
     }
     try {
       await api.documents.patch(movingDoc.id, {
-        email: currentUser.email,
         folder_id: folderId || null,
         vault_section_id: vaultSectionId || null,
       });
@@ -1404,7 +1396,6 @@ function App() {
     }
     try {
       await api.folders.patch(movingFolder.id, {
-        email: currentUser.email,
         parent_folder_id: parentFolderId || null,
         vault_section_id: vaultSectionId || null,
       });
@@ -1615,7 +1606,7 @@ function App() {
       if (typeof imageData !== 'string') return;
       setAccountBusy(true);
       try {
-        const res = await api.auth.uploadProfileImage(currentUser.email, imageData);
+        const res = await api.auth.uploadProfileImage(imageData);
         const next = sessionFromApiUser(res.user, currentUser.email, currentUser.full_name);
         setCurrentUser(next);
         setAccountNotice("Profile photo updated.");
@@ -1648,7 +1639,7 @@ function App() {
     }
     setAccountBusy(true);
     try {
-      const res = await api.auth.updateProfile(currentUser.email, trimmed);
+      const res = await api.auth.updateProfile(trimmed);
       const next = sessionFromApiUser(res.user, currentUser.email, trimmed);
       setCurrentUser({ ...next, profile_image: currentUser.profile_image || next.profile_image });
       setAccountNameInput(trimmed);
@@ -1691,7 +1682,7 @@ function App() {
     }
     setAccountBusy(true);
     try {
-      await api.auth.changePassword(currentUser.email, pwdCurrent, pwdNew);
+      await api.auth.changePassword(pwdCurrent, pwdNew);
       setPwdCurrent("");
       setPwdNew("");
       setPwdConfirm("");
@@ -1717,7 +1708,7 @@ function App() {
     }
     setAccountBusy(true);
     try {
-      await api.auth.deleteAccount(currentUser.email, deleteAccountPassword);
+      await api.auth.deleteAccount(deleteAccountPassword);
       setShowDeleteAccountConfirm(false);
       setDeleteAccountPassword("");
       setCurrentUser(null);

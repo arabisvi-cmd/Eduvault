@@ -100,6 +100,8 @@ If that fails with **duplicate column name: vault_section_id**, the column is al
 
 Run [d1-migrate-documents-trash.sql](./d1-migrate-documents-trash.sql) once for workspace trash (`deleted_at` on documents).
 
+Run [d1-migrate-sessions.sql](./d1-migrate-sessions.sql) for API session tokens (PR3).
+
 ---
 
 ## 4. Deploy EduVault to Cloudflare Pages

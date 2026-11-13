@@ -2,6 +2,8 @@
 // Client API layer for EduVault supporting Cloudflare D1 Backend
 
 const API_BASE = '/api';
+const TOKEN_KEY = 'eduvault_token';
+const USER_KEY = 'eduvault_user';
 
 async function safeFetch(url, options = {}) {
   // In Node/jsdom test environments without an origin, guard against relative URL failures
@@ -9,6 +11,30 @@ async function safeFetch(url, options = {}) {
     throw new TypeError('Failed to fetch: No origin');
   }
   return fetch(url, options);
+}
+
+function getStoredToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function authHeaders(extra = {}) {
+  const headers = { 'Content-Type': 'application/json', ...extra };
+  const token = getStoredToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
+function persistSession(data) {
+  if (data?.user) {
+    localStorage.setItem(USER_KEY, JSON.stringify(data.user));
+  }
+  if (data?.token) {
+    localStorage.setItem(TOKEN_KEY, data.token);
+  }
 }
 
 async function parseApiJson(res) {
@@ -35,7 +61,7 @@ export const api = {
         body: JSON.stringify({ email, password }),
       });
       const data = await parseApiJson(res);
-      localStorage.setItem('eduvault_user', JSON.stringify(data.user));
+      persistSession(data);
       return data;
     },
 
@@ -46,42 +72,41 @@ export const api = {
         body: JSON.stringify({ email, password, full_name, institution }),
       });
       const data = await parseApiJson(res);
-      localStorage.setItem('eduvault_user', JSON.stringify(data.user));
+      persistSession(data);
       return data;
     },
 
-    async updateProfile(email, full_name) {
+    async updateProfile(full_name) {
       const res = await safeFetch(`${API_BASE}/auth/update-profile`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, full_name }),
+        headers: authHeaders(),
+        body: JSON.stringify({ full_name }),
       });
       const data = await parseApiJson(res);
       if (data.user) {
-        localStorage.setItem('eduvault_user', JSON.stringify(data.user));
+        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
       }
       return data;
     },
 
-    async uploadProfileImage(email, imageData) {
+    async uploadProfileImage(imageData) {
       const res = await safeFetch(`${API_BASE}/auth/profile-image`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, image_data: imageData }),
+        headers: authHeaders(),
+        body: JSON.stringify({ image_data: imageData }),
       });
       const data = await parseApiJson(res);
       if (data.user) {
-        localStorage.setItem('eduvault_user', JSON.stringify(data.user));
+        localStorage.setItem(USER_KEY, JSON.stringify(data.user));
       }
       return data;
     },
 
-    async changePassword(email, currentPassword, newPassword) {
+    async changePassword(currentPassword, newPassword) {
       const res = await safeFetch(`${API_BASE}/auth/change-password`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify({
-          email,
           current_password: currentPassword,
           new_password: newPassword,
         }),
@@ -89,24 +114,34 @@ export const api = {
       return parseApiJson(res);
     },
 
-    async deleteAccount(email, password) {
+    async deleteAccount(password) {
       const res = await safeFetch(`${API_BASE}/auth/delete-account`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        headers: authHeaders(),
+        body: JSON.stringify({ password }),
       });
       const data = await parseApiJson(res);
-      localStorage.removeItem('eduvault_user');
+      localStorage.removeItem(USER_KEY);
+      localStorage.removeItem(TOKEN_KEY);
       return data;
     },
 
-    logout() {
-      localStorage.removeItem('eduvault_user');
+    async logout() {
+      try {
+        await safeFetch(`${API_BASE}/auth/logout`, {
+          method: 'POST',
+          headers: authHeaders(),
+        });
+      } catch {
+        // offline logout still clears local session
+      }
+      localStorage.removeItem(USER_KEY);
+      localStorage.removeItem(TOKEN_KEY);
     },
 
     getCurrentUser() {
       try {
-        const stored = localStorage.getItem('eduvault_user');
+        const stored = localStorage.getItem(USER_KEY);
         return stored ? JSON.parse(stored) : null;
       } catch {
         return null;
@@ -129,7 +164,7 @@ export const api = {
     async create(doc) {
       const res = await safeFetch(`${API_BASE}/documents`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(doc),
       });
       const data = await parseApiJson(res);
@@ -139,7 +174,7 @@ export const api = {
     async patch(id, payload) {
       const res = await safeFetch(`${API_BASE}/documents/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await parseApiJson(res);
@@ -156,21 +191,21 @@ export const api = {
       return data.data || [];
     },
 
-    async create({ email, institution_id, name }) {
+    async create({ institution_id, name }) {
       const res = await safeFetch(`${API_BASE}/vault-sections`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, institution_id, name }),
+        headers: authHeaders(),
+        body: JSON.stringify({ institution_id, name }),
       });
       const data = await parseApiJson(res);
       return data.data;
     },
 
-    async delete({ email, password, id, institution_id }) {
+    async delete({ password, id, institution_id }) {
       const res = await safeFetch(`${API_BASE}/vault-sections/delete`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password, id, institution_id }),
+        headers: authHeaders(),
+        body: JSON.stringify({ password, id, institution_id }),
       });
       return parseApiJson(res);
     },
@@ -188,7 +223,7 @@ export const api = {
     async create(payload) {
       const res = await safeFetch(`${API_BASE}/folders`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await parseApiJson(res);
@@ -198,7 +233,7 @@ export const api = {
     async patch(id, payload) {
       const res = await safeFetch(`${API_BASE}/folders/${encodeURIComponent(id)}`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: authHeaders(),
         body: JSON.stringify(payload),
       });
       const data = await parseApiJson(res);

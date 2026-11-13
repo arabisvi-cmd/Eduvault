@@ -22,10 +22,46 @@ function canWriteWorkspace(user) {
   return t === 'admin' || t === 'teacher';
 }
 
-async function requireUserByEmail(env, email) {
-  const normalized = String(email || '').toLowerCase().trim();
-  if (!normalized) return null;
-  return env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(normalized).first();
+const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+function bearerToken(request) {
+  const auth = request.headers.get('Authorization') || '';
+  const m = auth.match(/^Bearer\s+(\S+)/i);
+  return m ? m[1] : null;
+}
+
+async function createSession(env, userId) {
+  const token = crypto.randomUUID();
+  const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
+  await env.DB.prepare(
+    'INSERT INTO sessions (token, user_id, expires_at) VALUES (?, ?, ?)'
+  ).bind(token, userId, expiresAt).run();
+  return token;
+}
+
+async function revokeSession(env, token) {
+  if (!token) return;
+  await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
+}
+
+async function getActor(request, env) {
+  const token = bearerToken(request);
+  if (!token) return null;
+  const session = await env.DB.prepare(
+    'SELECT user_id, expires_at FROM sessions WHERE token = ?'
+  ).bind(token).first();
+  if (!session) return null;
+  if (session.expires_at && new Date(session.expires_at) < new Date()) {
+    await revokeSession(env, token);
+    return null;
+  }
+  const user = await env.DB.prepare('SELECT * FROM users WHERE id = ?').bind(session.user_id).first();
+  if (!user) return null;
+  return await syncUserTypeFromRoster(env, user);
+}
+
+async function requireActor(request, env) {
+  return getActor(request, env);
 }
 
 async function verifyUserPassword(env, user, password) {
@@ -168,9 +204,9 @@ export async function handleApi(request, env) {
 
     if (path === '/documents' && request.method === 'POST') {
       const body = await request.json();
-      const actor = await requireUserByEmail(env, body.email);
+      const actor = await requireActor(request, env);
       if (!actor) {
-        return jsonResponse({ error: 'Valid email is required to upload documents' }, 401);
+        return jsonResponse({ error: 'Authentication required' }, 401);
       }
       if (!canWriteWorkspace(actor)) {
         return jsonResponse({ error: 'You have read-only access' }, 403);
@@ -205,8 +241,8 @@ export async function handleApi(request, env) {
     const documentPatchId = pathSuffixId(path, '/documents');
     if (documentPatchId && request.method === 'PATCH') {
       const body = await request.json();
-      const actor = await requireUserByEmail(env, body.email);
-      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
 
       const existing = await env.DB.prepare('SELECT * FROM documents WHERE id = ?').bind(documentPatchId).first();
@@ -260,8 +296,8 @@ export async function handleApi(request, env) {
 
     if (path === '/vault-sections' && request.method === 'POST') {
       const body = await request.json();
-      const actor = await requireUserByEmail(env, body.email);
-      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
 
       const name = String(body.name || '').trim();
@@ -281,8 +317,8 @@ export async function handleApi(request, env) {
 
     if (path === '/vault-sections/delete' && request.method === 'POST') {
       const body = await request.json();
-      const actor = await requireUserByEmail(env, body.email);
-      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
       if (!body.password || !(await verifyUserPassword(env, actor, body.password))) {
         return jsonResponse({ error: 'Password is incorrect' }, 401);
@@ -319,8 +355,8 @@ export async function handleApi(request, env) {
 
     if (path === '/folders' && request.method === 'POST') {
       const body = await request.json();
-      const actor = await requireUserByEmail(env, body.email);
-      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
 
       const name = String(body.name || '').trim();
@@ -365,8 +401,8 @@ export async function handleApi(request, env) {
     const folderPatchId = pathSuffixId(path, '/folders');
     if (folderPatchId && request.method === 'PATCH') {
       const body = await request.json();
-      const actor = await requireUserByEmail(env, body.email);
-      if (!actor) return jsonResponse({ error: 'Valid email is required' }, 401);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
 
       const existing = await env.DB.prepare('SELECT * FROM folders WHERE id = ?').bind(folderPatchId).first();
@@ -444,8 +480,11 @@ export async function handleApi(request, env) {
         'INSERT INTO users (id, email, password_hash, salt, full_name, institution, user_type) VALUES (?, ?, ?, ?, ?, ?, ?)'
       ).bind(userId, normalizedEmail, hash, salt, full_name || '', rosterInstitution, userType).run();
 
+      const token = await createSession(env, userId);
+
       return jsonResponse({
         success: true,
+        token,
         user: {
           id: userId,
           email: normalizedEmail,
@@ -474,34 +513,40 @@ export async function handleApi(request, env) {
       }
 
       const syncedUser = await syncUserTypeFromRoster(env, user);
+      const token = await createSession(env, syncedUser.id);
 
       return jsonResponse({
         success: true,
+        token,
         user: publicUser(syncedUser),
       });
     }
 
+    if (path === '/auth/logout' && request.method === 'POST') {
+      await revokeSession(env, bearerToken(request));
+      return jsonResponse({ success: true });
+    }
+
     if (path === '/auth/update-profile' && request.method === 'POST') {
-      const { email, full_name } = await request.json();
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
+      const { full_name } = await request.json();
       const trimmed = (full_name || '').trim();
-      if (!email || !trimmed) {
-        return jsonResponse({ error: 'Email and name are required' }, 400);
+      if (!trimmed) {
+        return jsonResponse({ error: 'Name is required' }, 400);
       }
 
-      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
-      if (!user) {
-        return jsonResponse({ error: 'Account not found' }, 404);
-      }
-
-      await env.DB.prepare('UPDATE users SET full_name = ? WHERE id = ?').bind(trimmed, user.id).run();
-      const updated = { ...user, full_name: trimmed };
+      await env.DB.prepare('UPDATE users SET full_name = ? WHERE id = ?').bind(trimmed, actor.id).run();
+      const updated = { ...actor, full_name: trimmed };
       return jsonResponse({ success: true, user: publicUser(updated) });
     }
 
     if (path === '/auth/profile-image' && request.method === 'POST') {
-      const { email, image_data } = await request.json();
-      if (!email || !image_data) {
-        return jsonResponse({ error: 'Email and image are required' }, 400);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
+      const { image_data } = await request.json();
+      if (!image_data) {
+        return jsonResponse({ error: 'Image is required' }, 400);
       }
       const isDataUrl = /^data:image\/(jpeg|jpg|png|webp|gif);base64,/i.test(image_data);
       if (!isDataUrl) {
@@ -512,65 +557,54 @@ export async function handleApi(request, env) {
         return jsonResponse({ error: 'Image is too large (max about 400KB)' }, 400);
       }
 
-      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
-      if (!user) {
-        return jsonResponse({ error: 'Account not found' }, 404);
-      }
-
-      await env.DB.prepare('UPDATE users SET profile_image = ? WHERE id = ?').bind(image_data, user.id).run();
-      const updated = { ...user, profile_image: image_data };
+      await env.DB.prepare('UPDATE users SET profile_image = ? WHERE id = ?').bind(image_data, actor.id).run();
+      const updated = { ...actor, profile_image: image_data };
       return jsonResponse({ success: true, user: publicUser(updated) });
     }
 
     if (path === '/auth/change-password' && request.method === 'POST') {
-      const { email, current_password, new_password } = await request.json();
-      if (!email || !current_password || !new_password) {
-        return jsonResponse({ error: 'Email, current password, and new password are required' }, 400);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
+      const { current_password, new_password } = await request.json();
+      if (!current_password || !new_password) {
+        return jsonResponse({ error: 'Current and new password are required' }, 400);
       }
       if (new_password.length < 8) {
         return jsonResponse({ error: 'New password must be at least 8 characters' }, 400);
       }
 
-      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
-      if (!user) {
-        return jsonResponse({ error: 'Account not found' }, 404);
-      }
-
-      const { hash: currentHash } = await hashPassword(current_password, user.salt);
-      if (currentHash !== user.password_hash) {
+      const { hash: currentHash } = await hashPassword(current_password, actor.salt);
+      if (currentHash !== actor.password_hash) {
         return jsonResponse({ error: 'Current password is incorrect' }, 401);
       }
 
       const { hash, salt } = await hashPassword(new_password);
       await env.DB.prepare(
         'UPDATE users SET password_hash = ?, salt = ? WHERE id = ?'
-      ).bind(hash, salt, user.id).run();
+      ).bind(hash, salt, actor.id).run();
 
       return jsonResponse({ success: true });
     }
 
     if (path === '/auth/delete-account' && request.method === 'POST') {
-      const { email, password } = await request.json();
-      if (!email || !password) {
-        return jsonResponse({ error: 'Email and password are required to delete your account' }, 400);
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
+      const { password } = await request.json();
+      if (!password) {
+        return jsonResponse({ error: 'Password is required to delete your account' }, 400);
       }
 
-      const user = await env.DB.prepare('SELECT * FROM users WHERE email = ?').bind(email.toLowerCase()).first();
-      if (!user) {
-        return jsonResponse({ error: 'Account not found' }, 404);
-      }
-
-      const { hash } = await hashPassword(password, user.salt);
-      if (hash !== user.password_hash) {
+      const { hash } = await hashPassword(password, actor.salt);
+      if (hash !== actor.password_hash) {
         return jsonResponse({ error: 'Password is incorrect' }, 401);
       }
 
-      const synced = await syncUserTypeFromRoster(env, user);
-      if (normalizeUserType(synced.user_type) !== 'admin') {
+      if (normalizeUserType(actor.user_type) !== 'admin') {
         return jsonResponse({ error: 'Only administrators can delete accounts' }, 403);
       }
 
-      await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user.id).run();
+      await env.DB.prepare('DELETE FROM sessions WHERE user_id = ?').bind(actor.id).run();
+      await env.DB.prepare('DELETE FROM users WHERE id = ?').bind(actor.id).run();
       return jsonResponse({ success: true });
     }
 
