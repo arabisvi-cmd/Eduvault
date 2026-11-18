@@ -29,6 +29,8 @@ vi.mock('./lib/api', () => ({
       list: vi.fn().mockRejectedValue(new TypeError('Failed to fetch')),
       create: vi.fn().mockResolvedValue({}),
       patch: vi.fn().mockResolvedValue({}),
+      uploadBlob: vi.fn().mockResolvedValue({ success: true }),
+      downloadUrl: vi.fn().mockReturnValue(null),
     },
     vaultSections: {
       list: vi.fn().mockResolvedValue([]),

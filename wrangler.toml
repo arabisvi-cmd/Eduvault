@@ -16,3 +16,11 @@ database_id = "aee23ea2-0df7-4133-9d0f-c5fdc492f134"
 [[previews.d1_databases]]
 binding = "DB"
 database_id = "aee23ea2-0df7-4133-9d0f-c5fdc492f134"
+
+[[r2_buckets]]
+binding = "VAULT"
+bucket_name = "eduvault-vault"
+
+[[previews.r2_buckets]]
+binding = "VAULT"
+bucket_name = "eduvault-vault"

@@ -108,6 +108,16 @@ Run [d1-migrate-roster-class-grade.sql](./d1-migrate-roster-class-grade.sql) for
 
 Run [d1-migrate-resource-acl.sql](./d1-migrate-resource-acl.sql) for explicit `resource_acl` (PR5).
 
+Run [d1-migrate-documents-storage-key.sql](./d1-migrate-documents-storage-key.sql) for R2 file pointers (PR6).
+
+### R2 bucket (PR6)
+
+```bash
+npx wrangler r2 bucket create eduvault-vault
+```
+
+`wrangler.toml` binds it as `VAULT`. Uploads store blobs at `{institution}/{documentId}`; download uses session `access_token` query param.
+
 Example ACL (share a folder with all students in grade 10):
 
 ```sql

@@ -375,6 +375,18 @@ function mapSectionFromApi(row) {
   return { id: row.id, name: row.name };
 }
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const parts = String(reader.result || '').split(',');
+      resolve(parts[1] || '');
+    };
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
 function mapDocumentFromApi(doc) {
   const fileType = doc.file_type || doc.type || 'pdf';
   const created = doc.created_at ? new Date(doc.created_at) : null;
@@ -402,6 +414,7 @@ function mapDocumentFromApi(doc) {
     folderId: doc.folder_id || doc.folderId || null,
     vaultSectionId: doc.vault_section_id || undefined,
     isTrash: Boolean(doc.deleted_at),
+    hasStorage: Boolean(doc.storage_key),
     previewType: fileType === 'image' ? 'diagram-preview' : fileType === 'xlsx' ? 'sheet-preview' : fileType === 'code' ? 'code-preview' : 'pdf-text',
   };
 }
@@ -904,6 +917,16 @@ function App() {
 
   const foldersForGrid = activeFolderId === null ? workspaceFolders : workspaceChildFolders;
 
+  const handleDownloadDocument = (doc) => {
+    const url = api.documents.downloadUrl(doc.id);
+    if (!url) {
+      showToast('Sign in to download files', 'info');
+      return;
+    }
+    window.open(url, '_blank', 'noopener,noreferrer');
+    showToast(`Downloading "${doc.title}"`, 'check-circle');
+  };
+
   const handleWorkspaceFileUpload = async (e) => {
     if (!requireAuth()) {
       e.target.value = null;
@@ -936,7 +959,7 @@ function App() {
     const newDoc = {
       id: Date.now(),
       title: file.name,
-      institution: "inst-1",
+      institution: workspaceInstitutionId,
       year: "2026-2027",
       class: "grade-10",
       subject: "general",
@@ -974,6 +997,18 @@ function App() {
       });
       if (savedDoc?.id) {
         newDoc.id = savedDoc.id;
+        if (file.size <= 4 * 1024 * 1024) {
+          try {
+            const data = await fileToBase64(file);
+            await api.documents.uploadBlob(savedDoc.id, {
+              content_type: file.type || 'application/octet-stream',
+              data,
+            });
+            newDoc.hasStorage = true;
+          } catch {
+            showToast(`"${newDoc.title}" saved without file storage`, 'info');
+          }
+        }
       }
     } catch {
       // If Cloudflare D1 API is unavailable, fallback to Supabase if configured
@@ -2947,7 +2982,7 @@ function App() {
                                         <button 
                                           className="context-menu-item"
                                           onClick={() => {
-                                            showToast(`Downloading "${doc.title}"`, "check-circle");
+                                            handleDownloadDocument(doc);
                                             setActiveMenuDocId(null);
                                           }}
                                         >
@@ -3599,7 +3634,7 @@ function App() {
               <div className="modal-header-actions">
                 <button 
                   className="btn btn-primary btn-sm"
-                  onClick={() => showToast(`Simulated download: ${selectedFileForPreview.title}`, "check-circle")}
+                  onClick={() => handleDownloadDocument(selectedFileForPreview)}
                 >
                   <Download size={16} />
                   <span>Download</span>

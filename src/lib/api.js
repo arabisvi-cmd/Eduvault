@@ -180,6 +180,22 @@ export const api = {
       const data = await parseApiJson(res);
       return data.data;
     },
+
+    async uploadBlob(id, { content_type, data }) {
+      const res = await safeFetch(`${API_BASE}/documents/${encodeURIComponent(id)}/blob`, {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({ content_type, data }),
+      });
+      return parseApiJson(res);
+    },
+
+    downloadUrl(id) {
+      const token = getStoredToken();
+      if (!token) return null;
+      const params = new URLSearchParams({ access_token: token });
+      return `${API_BASE}/documents/${encodeURIComponent(id)}/download?${params.toString()}`;
+    },
   },
 
   vaultSections: {

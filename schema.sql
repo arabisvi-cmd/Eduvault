@@ -45,6 +45,8 @@ CREATE TABLE IF NOT EXISTS documents (
     folder_id TEXT,
     vault_section_id TEXT,
     deleted_at DATETIME,
+    storage_key TEXT,
+    content_type TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

@@ -44,8 +44,9 @@ async function revokeSession(env, token) {
   await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
 }
 
-async function getActor(request, env) {
-  const token = bearerToken(request);
+const MAX_DOCUMENT_BLOB_BYTES = 4 * 1024 * 1024;
+
+async function getActorFromToken(env, token) {
   if (!token) return null;
   const session = await env.DB.prepare(
     'SELECT user_id, expires_at FROM sessions WHERE token = ?'
@@ -60,8 +61,26 @@ async function getActor(request, env) {
   return await syncUserTypeFromRoster(env, user);
 }
 
+async function getActor(request, env) {
+  return getActorFromToken(env, bearerToken(request));
+}
+
 async function requireActor(request, env) {
   return getActor(request, env);
+}
+
+async function requireActorFromRequest(request, env) {
+  const actor = await getActor(request, env);
+  if (actor) return actor;
+  const url = new URL(request.url);
+  return getActorFromToken(env, url.searchParams.get('access_token') || '');
+}
+
+function decodeBase64ToBytes(b64) {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
 }
 
 async function verifyUserPassword(env, user, password) {
@@ -347,6 +366,67 @@ export async function handleApi(request, env) {
       ).run();
 
       return jsonResponse({ success: true, data: { id, ...body, folder_id: folderId, vault_section_id: vaultSectionId } });
+    }
+
+    const blobDocId = path.match(/^\/documents\/([^/]+)\/blob$/)?.[1];
+    if (blobDocId && request.method === 'POST') {
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
+      if (!canWriteWorkspace(actor)) return jsonResponse({ error: 'You have read-only access' }, 403);
+      if (!env.VAULT) return jsonResponse({ error: 'Object storage (VAULT) is not configured.' }, 500);
+
+      const existing = await env.DB.prepare('SELECT * FROM documents WHERE id = ?').bind(blobDocId).first();
+      if (!existing) return jsonResponse({ error: 'Document not found' }, 404);
+
+      const body = await request.json();
+      const dataB64 = body.data || body.file_base64 || '';
+      if (!dataB64) return jsonResponse({ error: 'File data is required' }, 400);
+
+      let bytes;
+      try {
+        bytes = decodeBase64ToBytes(dataB64);
+      } catch {
+        return jsonResponse({ error: 'Invalid file encoding' }, 400);
+      }
+      if (bytes.byteLength > MAX_DOCUMENT_BLOB_BYTES) {
+        return jsonResponse({ error: 'File is too large (max 4 MB for this API)' }, 400);
+      }
+
+      const contentType = body.content_type || existing.content_type || 'application/octet-stream';
+      const storageKey = `${existing.institution || actor.institution || 'inst-1'}/${blobDocId}`;
+      await env.VAULT.put(storageKey, bytes, { httpMetadata: { contentType } });
+      await env.DB.prepare(
+        'UPDATE documents SET storage_key = ?, content_type = ? WHERE id = ?'
+      ).bind(storageKey, contentType, blobDocId).run();
+
+      return jsonResponse({
+        success: true,
+        data: { id: blobDocId, storage_key: storageKey, content_type: contentType },
+      });
+    }
+
+    const downloadDocId = path.match(/^\/documents\/([^/]+)\/download$/)?.[1];
+    if (downloadDocId && request.method === 'GET') {
+      const actor = await requireActorFromRequest(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
+      if (!env.VAULT) return jsonResponse({ error: 'Object storage (VAULT) is not configured.' }, 500);
+
+      const existing = await env.DB.prepare('SELECT * FROM documents WHERE id = ?').bind(downloadDocId).first();
+      if (!existing) return jsonResponse({ error: 'Document not found' }, 404);
+      if (!(await canReadDocument(env, actor, existing))) {
+        return jsonResponse({ error: 'Access denied' }, 403);
+      }
+      if (!existing.storage_key) return jsonResponse({ error: 'No file stored for this document' }, 404);
+
+      const obj = await env.VAULT.get(existing.storage_key);
+      if (!obj) return jsonResponse({ error: 'File not found in storage' }, 404);
+
+      const headers = new Headers({
+        'Access-Control-Allow-Origin': '*',
+        'Content-Type': existing.content_type || obj.httpMetadata?.contentType || 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(existing.title || 'download')}"`,
+      });
+      return new Response(obj.body, { status: 200, headers });
     }
 
     const documentPatchId = pathSuffixId(path, '/documents');
