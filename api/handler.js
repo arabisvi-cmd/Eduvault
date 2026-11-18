@@ -118,22 +118,81 @@ function publicUser(row) {
     institution: row.institution,
     profile_image: row.profile_image || '',
     user_type: row.user_type || 'student',
+    class_grade: row.class_grade || '',
+    class_division: row.class_division || '',
   };
+}
+
+function actorInstitution(actor, requestedId) {
+  const inst = (requestedId || actor.institution || '').trim();
+  const actorInst = (actor.institution || '').trim();
+  if (!inst || !actorInst || inst !== actorInst) return null;
+  return inst;
+}
+
+function documentsListFilter(actor, trashView) {
+  const deletedClause = trashView ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL';
+  const t = normalizeUserType(actor.user_type);
+  const inst = (actor.institution || '').trim();
+  if (!inst) return { sql: '1 = 0', binds: [] };
+
+  if (t === 'admin' || t === 'teacher') {
+    return {
+      sql: `institution = ? AND ${deletedClause}`,
+      binds: [inst],
+    };
+  }
+  if (t === 'student') {
+    const grade = (actor.class_grade || '').trim();
+    if (!grade) return { sql: '1 = 0', binds: [] };
+    return {
+      sql: `institution = ? AND ${deletedClause} AND class_grade = ?`,
+      binds: [inst, grade],
+    };
+  }
+  if (t === 'non_teaching_staff') {
+    return {
+      sql: `institution = ? AND ${deletedClause} AND (role IS NULL OR role != 'students')`,
+      binds: [inst],
+    };
+  }
+  return { sql: '1 = 0', binds: [] };
 }
 
 async function lookupDirectoryUser(env, email) {
   return env.DB.prepare(
-    'SELECT email, user_type, institution FROM user_directory WHERE email = ?'
+    'SELECT email, user_type, institution, class_grade, class_division FROM user_directory WHERE email = ?'
   ).bind(email.toLowerCase()).first();
 }
 
 async function syncUserTypeFromRoster(env, userRow) {
   const directoryEntry = await lookupDirectoryUser(env, userRow.email);
   if (!directoryEntry) return userRow;
+
   const rosterType = normalizeUserType(directoryEntry.user_type);
-  if (!rosterType || rosterType === userRow.user_type) return userRow;
-  await env.DB.prepare('UPDATE users SET user_type = ? WHERE id = ?').bind(rosterType, userRow.id).run();
-  return { ...userRow, user_type: rosterType };
+  const nextType = rosterType || userRow.user_type;
+  const nextGrade = directoryEntry.class_grade ?? userRow.class_grade ?? '';
+  const nextDivision = directoryEntry.class_division ?? userRow.class_division ?? '';
+  const nextInst = directoryEntry.institution || userRow.institution || '';
+
+  const unchanged = nextType === userRow.user_type
+    && String(nextGrade) === String(userRow.class_grade || '')
+    && String(nextDivision) === String(userRow.class_division || '')
+    && String(nextInst) === String(userRow.institution || '');
+  if (!unchanged) {
+    await env.DB.prepare(
+      `UPDATE users SET user_type = ?, class_grade = ?, class_division = ?, institution = ?
+       WHERE id = ?`
+    ).bind(nextType, nextGrade, nextDivision, nextInst, userRow.id).run();
+  }
+
+  return {
+    ...userRow,
+    user_type: nextType,
+    class_grade: nextGrade,
+    class_division: nextDivision,
+    institution: nextInst,
+  };
 }
 
 async function hashPassword(password, saltHex = null) {
@@ -189,16 +248,16 @@ export async function handleApi(request, env) {
 
   try {
     if (path === '/documents' && request.method === 'GET') {
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       const institutionId = url.searchParams.get('institution_id') || '';
+      const inst = actorInstitution(actor, institutionId);
+      if (!inst) return jsonResponse({ error: 'Invalid institution' }, 403);
       const trashView = url.searchParams.get('trash') === '1';
-      const deletedClause = trashView ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL';
-      const { results } = institutionId
-        ? await env.DB.prepare(
-            `SELECT * FROM documents WHERE institution = ? AND ${deletedClause} ORDER BY created_at DESC LIMIT 200`
-          ).bind(institutionId).all()
-        : await env.DB.prepare(
-            `SELECT * FROM documents WHERE ${deletedClause} ORDER BY created_at DESC LIMIT 200`
-          ).all();
+      const filter = documentsListFilter(actor, trashView);
+      const { results } = await env.DB.prepare(
+        `SELECT * FROM documents WHERE ${filter.sql} ORDER BY created_at DESC LIMIT 200`
+      ).bind(...filter.binds).all();
       return jsonResponse({ data: results || [] });
     }
 
@@ -286,11 +345,14 @@ export async function handleApi(request, env) {
     }
 
     if (path === '/vault-sections' && request.method === 'GET') {
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       const institutionId = url.searchParams.get('institution_id') || '';
-      if (!institutionId) return jsonResponse({ error: 'institution_id is required' }, 400);
+      const inst = actorInstitution(actor, institutionId);
+      if (!inst) return jsonResponse({ error: 'Invalid institution' }, 403);
       const { results } = await env.DB.prepare(
         'SELECT * FROM vault_sections WHERE institution_id = ? ORDER BY sort_order ASC, created_at ASC'
-      ).bind(institutionId).all();
+      ).bind(inst).all();
       return jsonResponse({ data: (results || []).map(mapVaultSectionRow) });
     }
 
@@ -345,11 +407,14 @@ export async function handleApi(request, env) {
     }
 
     if (path === '/folders' && request.method === 'GET') {
+      const actor = await requireActor(request, env);
+      if (!actor) return jsonResponse({ error: 'Authentication required' }, 401);
       const institutionId = url.searchParams.get('institution_id') || '';
-      if (!institutionId) return jsonResponse({ error: 'institution_id is required' }, 400);
+      const inst = actorInstitution(actor, institutionId);
+      if (!inst) return jsonResponse({ error: 'Invalid institution' }, 403);
       const { results } = await env.DB.prepare(
         'SELECT * FROM folders WHERE institution_id = ? ORDER BY created_at DESC'
-      ).bind(institutionId).all();
+      ).bind(inst).all();
       return jsonResponse({ data: (results || []).map(mapFolderRow) });
     }
 
@@ -472,27 +537,36 @@ export async function handleApi(request, env) {
       }
 
       const rosterInstitution = directoryEntry.institution || institution || '';
+      const rosterGrade = directoryEntry.class_grade || '';
+      const rosterDivision = directoryEntry.class_division || '';
 
       const { hash, salt } = await hashPassword(password);
       const userId = `usr_${Date.now()}`;
 
       await env.DB.prepare(
-        'INSERT INTO users (id, email, password_hash, salt, full_name, institution, user_type) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).bind(userId, normalizedEmail, hash, salt, full_name || '', rosterInstitution, userType).run();
+        `INSERT INTO users (
+          id, email, password_hash, salt, full_name, institution, user_type, class_grade, class_division
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(
+        userId, normalizedEmail, hash, salt, full_name || '',
+        rosterInstitution, userType, rosterGrade, rosterDivision
+      ).run();
 
       const token = await createSession(env, userId);
 
       return jsonResponse({
         success: true,
         token,
-        user: {
+        user: publicUser({
           id: userId,
           email: normalizedEmail,
-          full_name,
+          full_name: full_name || '',
           institution: rosterInstitution,
           profile_image: '',
           user_type: userType,
-        }
+          class_grade: rosterGrade,
+          class_division: rosterDivision,
+        }),
       });
     }
 

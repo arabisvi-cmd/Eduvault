@@ -156,7 +156,7 @@ export const api = {
       if (institutionId) params.set('institution_id', institutionId);
       if (trash) params.set('trash', '1');
       const qs = params.toString() ? `?${params.toString()}` : '';
-      const res = await safeFetch(`${API_BASE}/documents${qs}`);
+      const res = await safeFetch(`${API_BASE}/documents${qs}`, { headers: authHeaders() });
       const data = await parseApiJson(res);
       return data.data || [];
     },
@@ -185,7 +185,8 @@ export const api = {
   vaultSections: {
     async list(institutionId) {
       const res = await safeFetch(
-        `${API_BASE}/vault-sections?institution_id=${encodeURIComponent(institutionId)}`
+        `${API_BASE}/vault-sections?institution_id=${encodeURIComponent(institutionId)}`,
+        { headers: authHeaders() }
       );
       const data = await parseApiJson(res);
       return data.data || [];
@@ -214,7 +215,8 @@ export const api = {
   folders: {
     async list(institutionId) {
       const res = await safeFetch(
-        `${API_BASE}/folders?institution_id=${encodeURIComponent(institutionId)}`
+        `${API_BASE}/folders?institution_id=${encodeURIComponent(institutionId)}`,
+        { headers: authHeaders() }
       );
       const data = await parseApiJson(res);
       return data.data || [];

@@ -10,6 +10,8 @@ CREATE TABLE IF NOT EXISTS users (
     institution TEXT,
     profile_image TEXT,
     user_type TEXT DEFAULT 'student',
+    class_grade TEXT,
+    class_division TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -81,6 +83,8 @@ CREATE TABLE IF NOT EXISTS user_directory (
     email TEXT PRIMARY KEY,
     user_type TEXT NOT NULL,
     institution TEXT,
+    class_grade TEXT,
+    class_division TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 

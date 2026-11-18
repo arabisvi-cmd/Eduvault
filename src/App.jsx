@@ -441,7 +441,15 @@ function sessionFromApiUser(user, fallbackEmail = '', fallbackName = '') {
   const full_name = (user?.full_name || fallbackName || '').trim();
   const profile_image = user?.profile_image || '';
   const user_type = user?.user_type || 'student';
-  return { email, full_name, profile_image, user_type };
+  return {
+    email,
+    full_name,
+    profile_image,
+    user_type,
+    class_grade: user?.class_grade || '',
+    class_division: user?.class_division || '',
+    institution: user?.institution || '',
+  };
 }
 
 function UserAvatar({ user, className = '', size = 16 }) {
@@ -689,7 +697,7 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [workspaceInstitutionId]);
+  }, [workspaceInstitutionId, currentUser?.email]);
 
   useEffect(() => {
     const activeId = getSelectedVaultSectionId(selectedNav);
@@ -731,7 +739,7 @@ function App() {
       }
     })();
     return () => { cancelled = true; };
-  }, [workspaceInstitutionId, trashNavActive]);
+  }, [workspaceInstitutionId, trashNavActive, currentUser?.email]);
 
   useEffect(() => {
     const target = location.state?.scrollTo;

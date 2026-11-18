@@ -78,8 +78,10 @@ npx wrangler d1 execute eduvault-db --remote --file=./d1-migrate-existing.sql
 Then add your email to the roster before sign-up:
 
 ```sql
-INSERT OR IGNORE INTO user_directory (email, user_type, institution)
-VALUES ('you@school.edu', 'teacher', 'inst-1');
+INSERT OR IGNORE INTO user_directory (email, user_type, institution, class_grade)
+VALUES ('you@school.edu', 'teacher', 'inst-1', NULL);
+INSERT OR IGNORE INTO user_directory (email, user_type, institution, class_grade)
+VALUES ('student@school.edu', 'student', 'inst-1', 'grade-10');
 ```
 
 ---
@@ -101,6 +103,8 @@ If that fails with **duplicate column name: vault_section_id**, the column is al
 Run [d1-migrate-documents-trash.sql](./d1-migrate-documents-trash.sql) once for workspace trash (`deleted_at` on documents).
 
 Run [d1-migrate-sessions.sql](./d1-migrate-sessions.sql) for API session tokens (PR3).
+
+Run [d1-migrate-roster-class-grade.sql](./d1-migrate-roster-class-grade.sql) for student file visibility (PR4).
 
 ---
 
