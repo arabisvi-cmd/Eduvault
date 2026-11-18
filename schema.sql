@@ -90,6 +90,17 @@ CREATE TABLE IF NOT EXISTS user_directory (
 
 CREATE INDEX IF NOT EXISTS idx_user_directory_type ON user_directory(user_type);
 
+CREATE TABLE IF NOT EXISTS resource_acl (
+    id TEXT PRIMARY KEY,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT NOT NULL,
+    principal_type TEXT NOT NULL,
+    principal_value TEXT NOT NULL,
+    permission TEXT NOT NULL DEFAULT 'read'
+);
+
+CREATE INDEX IF NOT EXISTS idx_resource_acl_resource ON resource_acl(resource_type, resource_id);
+
 -- Example roster rows (adjust for your school):
 -- INSERT OR IGNORE INTO user_directory (email, user_type, institution) VALUES
 --   ('admin@school.edu', 'admin', 'inst-1'),

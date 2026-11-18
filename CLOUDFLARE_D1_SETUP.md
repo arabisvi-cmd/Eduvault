@@ -106,6 +106,15 @@ Run [d1-migrate-sessions.sql](./d1-migrate-sessions.sql) for API session tokens 
 
 Run [d1-migrate-roster-class-grade.sql](./d1-migrate-roster-class-grade.sql) for student file visibility (PR4).
 
+Run [d1-migrate-resource-acl.sql](./d1-migrate-resource-acl.sql) for explicit `resource_acl` (PR5).
+
+Example ACL (share a folder with all students in grade 10):
+
+```sql
+INSERT INTO resource_acl (id, resource_type, resource_id, principal_type, principal_value, permission)
+VALUES ('acl-1', 'folder', 'your-folder-id', 'class_grade', 'grade-10', 'read');
+```
+
 ---
 
 ## 4. Deploy EduVault to Cloudflare Pages

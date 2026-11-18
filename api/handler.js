@@ -132,31 +132,74 @@ function actorInstitution(actor, requestedId) {
 
 function documentsListFilter(actor, trashView) {
   const deletedClause = trashView ? 'deleted_at IS NOT NULL' : 'deleted_at IS NULL';
-  const t = normalizeUserType(actor.user_type);
   const inst = (actor.institution || '').trim();
   if (!inst) return { sql: '1 = 0', binds: [] };
+  return {
+    sql: `institution = ? AND ${deletedClause}`,
+    binds: [inst],
+  };
+}
 
-  if (t === 'admin' || t === 'teacher') {
-    return {
-      sql: `institution = ? AND ${deletedClause}`,
-      binds: [inst],
-    };
+function actorMatchesPrincipal(actor, principalType, principalValue) {
+  const principal = String(principalValue || '').trim();
+  if (!principal) return false;
+  if (principalType === 'user_type') {
+    return normalizeUserType(actor.user_type) === principal;
   }
-  if (t === 'student') {
-    const grade = (actor.class_grade || '').trim();
-    if (!grade) return { sql: '1 = 0', binds: [] };
-    return {
-      sql: `institution = ? AND ${deletedClause} AND class_grade = ?`,
-      binds: [inst, grade],
-    };
+  if (principalType === 'class_grade') {
+    return String(actor.class_grade || '').trim() === principal;
   }
-  if (t === 'non_teaching_staff') {
-    return {
-      sql: `institution = ? AND ${deletedClause} AND (role IS NULL OR role != 'students')`,
-      binds: [inst],
-    };
+  if (principalType === 'user') {
+    return actor.id === principal || String(actor.email || '').toLowerCase() === principal.toLowerCase();
   }
-  return { sql: '1 = 0', binds: [] };
+  return false;
+}
+
+async function resourceAclVerdict(env, resourceType, resourceId, actor) {
+  const { results } = await env.DB.prepare(
+    `SELECT principal_type, principal_value, permission FROM resource_acl
+     WHERE resource_type = ? AND resource_id = ?`
+  ).bind(resourceType, resourceId).all();
+  if (!results?.length) return null;
+  const readable = results.filter((r) => r.permission === 'read' || r.permission === 'admin');
+  if (!readable.length) return false;
+  return readable.some((r) => actorMatchesPrincipal(actor, r.principal_type, r.principal_value));
+}
+
+async function canReadDocument(env, actor, doc) {
+  const docInst = String(doc.institution || '').trim();
+  const actorInst = String(actor.institution || '').trim();
+  if (!docInst || docInst !== actorInst) return false;
+
+  const role = normalizeUserType(actor.user_type);
+  if (role === 'admin') return true;
+  if (role === 'teacher') return true;
+
+  const docAcl = await resourceAclVerdict(env, 'document', doc.id, actor);
+  if (docAcl === true) return true;
+  if (docAcl === false) return false;
+
+  if (doc.folder_id) {
+    const folderAcl = await resourceAclVerdict(env, 'folder', doc.folder_id, actor);
+    if (folderAcl === true) return true;
+    if (folderAcl === false) return false;
+  }
+
+  if (doc.vault_section_id) {
+    const sectionAcl = await resourceAclVerdict(env, 'vault_section', doc.vault_section_id, actor);
+    if (sectionAcl === true) return true;
+    if (sectionAcl === false) return false;
+  }
+
+  if (role === 'student') {
+    const grade = String(actor.class_grade || '').trim();
+    if (!grade) return false;
+    return String(doc.class_grade || '').trim() === grade;
+  }
+  if (role === 'non_teaching_staff') {
+    return doc.role !== 'students';
+  }
+  return false;
 }
 
 async function lookupDirectoryUser(env, email) {
@@ -258,7 +301,16 @@ export async function handleApi(request, env) {
       const { results } = await env.DB.prepare(
         `SELECT * FROM documents WHERE ${filter.sql} ORDER BY created_at DESC LIMIT 200`
       ).bind(...filter.binds).all();
-      return jsonResponse({ data: results || [] });
+      const rows = results || [];
+      const role = normalizeUserType(actor.user_type);
+      if (role === 'admin' || role === 'teacher') {
+        return jsonResponse({ data: rows });
+      }
+      const visible = [];
+      for (const doc of rows) {
+        if (await canReadDocument(env, actor, doc)) visible.push(doc);
+      }
+      return jsonResponse({ data: visible });
     }
 
     if (path === '/documents' && request.method === 'POST') {
@@ -687,3 +739,5 @@ export async function handleApi(request, env) {
     return jsonResponse({ error: err.message || 'Internal Server Error' }, 500);
   }
 }
+
+export { actorMatchesPrincipal };
